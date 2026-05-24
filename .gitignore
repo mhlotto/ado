@@ -1,0 +1,16 @@
+.cache/
+server/.cache/
+bin/
+*.log
+clients/android/.gradle/
+clients/android/build/
+clients/android/app/build/
+clients/android/local.properties
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+*.pem
+server.zip
+android.zip
