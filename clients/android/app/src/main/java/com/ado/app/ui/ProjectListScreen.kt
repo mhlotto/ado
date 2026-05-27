@@ -3,8 +3,6 @@ package com.ado.app.ui
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -22,7 +20,6 @@ import kotlinx.coroutines.launch
 fun ProjectListScreen(
     repository: AdoRepository,
     onOpenProject: (String) -> Unit,
-    onOpenTemplates: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -94,9 +91,6 @@ fun ProjectListScreen(
     AdoScaffold(
         title = "Projects",
         onSettings = onOpenSettings,
-        actions = {
-            TextButton(onClick = onOpenTemplates) { Text("Templates") }
-        },
         bottomActions = listOf(
             BottomBarAction(
                 label = "Add",

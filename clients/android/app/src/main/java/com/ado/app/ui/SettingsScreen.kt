@@ -36,6 +36,7 @@ import kotlinx.coroutines.withContext
 fun SettingsScreen(
     repository: AdoRepository,
     onBack: () -> Unit,
+    onOpenTemplates: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -131,6 +132,18 @@ fun SettingsScreen(
                         scope.launch { repository.setRollUpCompleted(enabled) }
                     },
                 )
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Daily and home defaults", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Edit the items used when new generated lists are created.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MutedTextColor,
+                )
+                Button(onClick = onOpenTemplates) {
+                    Text("Templates")
+                }
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

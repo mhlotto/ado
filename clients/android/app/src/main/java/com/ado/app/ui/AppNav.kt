@@ -29,7 +29,6 @@ fun AppNav(repository: AdoRepository) {
             ProjectListScreen(
                 repository = repository,
                 onOpenProject = { navController.navigate("project/${it.routePart()}") },
-                onOpenTemplates = { navController.navigate("templates") },
                 onOpenSettings = { navController.navigate("settings") },
             )
         }
@@ -62,6 +61,7 @@ fun AppNav(repository: AdoRepository) {
             SettingsScreen(
                 repository = repository,
                 onBack = { navController.popBackStack() },
+                onOpenTemplates = { navController.navigate("templates") },
             )
         }
         composable("templates") {

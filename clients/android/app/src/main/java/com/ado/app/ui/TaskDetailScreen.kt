@@ -18,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.ado.app.data.AdoRepository
@@ -35,6 +36,7 @@ fun TaskDetailScreen(
     onOpenSettings: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var task by remember { mutableStateOf<Task?>(null) }
     var subtasks by remember { mutableStateOf<List<SubTask>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
@@ -199,6 +201,12 @@ fun TaskDetailScreen(
         }
     }
 
+    fun printSubTasks() {
+        val currentTask = task ?: return
+        val items = subtasksInPrintOrder(subtasks).filterNot { it.isDone }.map { ChecklistPrintItem(it.name) }
+        printChecklist(context, currentTask.name, items)
+    }
+
     LaunchedEffect(taskId, dataRevision) { refresh() }
 
     AdoScaffold(
@@ -219,6 +227,11 @@ fun TaskDetailScreen(
             BottomBarAction(
                 label = if (simpleView) "Full" else "Simple",
                 onClick = { simpleView = !simpleView },
+            ),
+            BottomBarAction(
+                label = "Print",
+                onClick = ::printSubTasks,
+                enabled = task != null && subtasks.any { !it.isDone },
             ),
         ),
     ) { padding ->
@@ -354,6 +367,9 @@ private fun subTaskFinishedAt(subTask: SubTask): Instant {
         Instant.MAX
     }
 }
+
+private fun subtasksInPrintOrder(subtasks: List<SubTask>): List<SubTask> =
+    subtasks.filterNot { it.isDone } + subtasks.filter { it.isDone }.sortedBy(::subTaskFinishedAt)
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable

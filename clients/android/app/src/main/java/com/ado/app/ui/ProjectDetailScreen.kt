@@ -4,12 +4,20 @@ import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -50,6 +58,7 @@ fun ProjectDetailScreen(
     var taskToEdit by remember { mutableStateOf<Task?>(null) }
     var taskToDelete by remember { mutableStateOf<Task?>(null) }
     var taskMoveProjects by remember { mutableStateOf<List<Project>>(emptyList()) }
+    var showPrintTaskSelection by remember { mutableStateOf(false) }
     var pendingDailyDate by remember { mutableStateOf<String?>(null) }
     var pendingCalendarDailyGeneration by remember { mutableStateOf<PendingDailyGeneration?>(null) }
     var simpleView by remember { mutableStateOf(false) }
@@ -260,6 +269,28 @@ fun ProjectDetailScreen(
         }
     }
 
+    fun printTasks(selectedTaskIds: Set<String>) {
+        val currentProject = project ?: return
+        scope.launch {
+            error = null
+            message = null
+            try {
+                val orderedTasks = tasksInChecklistOrder(currentProject, tasks).filter { !it.isDone && it.id in selectedTaskIds }
+                val items = buildList {
+                    orderedTasks.forEach { task ->
+                        add(ChecklistPrintItem(task.name))
+                        subTasksInChecklistOrder(repository.getSubTasks(task.id).data).filterNot { it.isDone }.forEach { subTask ->
+                            add(ChecklistPrintItem(subTask.name, indentLevel = 1))
+                        }
+                    }
+                }
+                printChecklist(context, currentProject.name, items)
+            } catch (e: Exception) {
+                error = repository.friendlyError(e)
+            }
+        }
+    }
+
     LaunchedEffect(projectId, dataRevision) { refresh() }
 
     AdoScaffold(
@@ -275,6 +306,11 @@ fun ProjectDetailScreen(
             BottomBarAction(
                 label = if (simpleView) "Full" else "Simple",
                 onClick = { simpleView = !simpleView },
+            ),
+            BottomBarAction(
+                label = "Print",
+                onClick = { showPrintTaskSelection = true },
+                enabled = project != null && tasks.any { !it.isDone },
             ),
         ),
     ) { padding ->
@@ -417,9 +453,78 @@ fun ProjectDetailScreen(
         )
     }
 
+    if (showPrintTaskSelection) {
+        PrintTaskSelectionDialog(
+            tasks = tasksInChecklistOrder(project, tasks).filterNot { it.isDone },
+            onDismiss = { showPrintTaskSelection = false },
+            onPrint = { selectedTaskIds ->
+                showPrintTaskSelection = false
+                printTasks(selectedTaskIds)
+            },
+        )
+    }
+
 }
 
 private data class PendingDailyGeneration(val date: String, val carryOver: Boolean)
+
+@Composable
+private fun PrintTaskSelectionDialog(
+    tasks: List<Task>,
+    onDismiss: () -> Unit,
+    onPrint: (Set<String>) -> Unit,
+) {
+    val allTaskIds = tasks.mapTo(linkedSetOf()) { it.id }
+    var selectedTaskIds by remember(tasks) { mutableStateOf<Set<String>>(allTaskIds) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Print checklist") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Select tasks to print. Subtasks for selected tasks are included.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = { selectedTaskIds = allTaskIds }) { Text("Select all") }
+                    TextButton(onClick = { selectedTaskIds = emptySet() }) { Text("Clear") }
+                }
+                LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
+                    items(tasks, key = { it.id }) { task ->
+                        val selected = task.id in selectedTaskIds
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    selectedTaskIds = if (selected) selectedTaskIds - task.id else selectedTaskIds + task.id
+                                }
+                                .padding(vertical = 3.dp),
+                            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                        ) {
+                            Checkbox(
+                                checked = selected,
+                                onCheckedChange = { checked ->
+                                    selectedTaskIds = if (checked) selectedTaskIds + task.id else selectedTaskIds - task.id
+                                },
+                            )
+                            Text(task.name, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = selectedTaskIds.isNotEmpty(),
+                onClick = { onPrint(selectedTaskIds) },
+            ) { Text("Print") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
+}
 
 private fun calculateSubTaskCounts(subTasks: List<com.ado.app.data.SubTask>): OpenDoneCounts =
     OpenDoneCounts(
@@ -431,6 +536,22 @@ private fun sortedTasksForProject(project: Project?, tasks: List<Task>): List<Ta
     if (project?.coreKey != "daily") return tasks
     return tasks.sortedByDescending { taskCreatedAt(it) }
 }
+
+private fun tasksInChecklistOrder(project: Project?, tasks: List<Task>): List<Task> {
+    val sorted = sortedTasksForProject(project, tasks)
+    return sorted.filterNot { it.isDone } + sorted.filter { it.isDone }.sortedBy(::taskFinishedAt)
+}
+
+private fun subTasksInChecklistOrder(subTasks: List<com.ado.app.data.SubTask>): List<com.ado.app.data.SubTask> =
+    subTasks.filterNot { it.isDone } + subTasks.filter { it.isDone }.sortedBy {
+        it.finishedAt?.let { finishedAt ->
+            try {
+                Instant.parse(finishedAt)
+            } catch (_: Exception) {
+                Instant.MAX
+            }
+        } ?: Instant.MAX
+    }
 
 private fun taskCreatedAt(task: Task): Instant =
     try {
