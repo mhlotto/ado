@@ -23,72 +23,29 @@ fun ProjectListScreen(
     repository: AdoRepository,
     onOpenProject: (String) -> Unit,
     onOpenTemplates: () -> Unit,
-    onOpenSync: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     var projects by remember { mutableStateOf<List<Project>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
-    var showingCache by remember { mutableStateOf(false) }
     var showCreateDialog by remember { mutableStateOf(false) }
     var projectToEdit by remember { mutableStateOf<Project?>(null) }
     var projectToDelete by remember { mutableStateOf<Project?>(null) }
-    var pendingCount by remember { mutableStateOf(0) }
     var simpleView by remember { mutableStateOf(false) }
-    var showOfflinePrompt by remember { mutableStateOf(false) }
-    val offlineMode by repository.offlineModeFlow.collectAsState(initial = false)
+    val dataRevision by repository.dataRevisionFlow.collectAsState(initial = 0)
 
     fun refresh() {
         scope.launch {
             loading = true
             error = null
-            val cached = repository.getCachedProjects()
-            if (cached.isNotEmpty()) {
-                projects = cached
-                showingCache = true
+            try {
+                projects = repository.getProjects().data
+            } catch (e: Exception) {
+                error = repository.friendlyError(e)
+            } finally {
+                loading = false
             }
-            val result = repository.getProjects()
-            projects = result.data
-            showingCache = result.fromCache
-            val resultError = if (repository.isOfflineMode()) null else result.errorMessage
-            error = resultError
-            if (resultError != null) {
-                showOfflinePrompt = true
-            }
-            pendingCount = repository.pendingMutationCount()
-            loading = false
-        }
-    }
-
-    LaunchedEffect(offlineMode) {
-        if (offlineMode) {
-            error = null
-            showOfflinePrompt = false
-        }
-    }
-
-    fun setOfflineMode(enabled: Boolean) {
-        scope.launch {
-            repository.setOfflineMode(enabled)
-            showOfflinePrompt = false
-            error = null
-            refresh()
-        }
-    }
-
-    fun refreshPendingCount() {
-        scope.launch {
-            pendingCount = repository.pendingMutationCount()
-        }
-    }
-
-    fun syncNow() {
-        scope.launch {
-            error = null
-            repository.syncPendingMutations()
-            pendingCount = repository.pendingMutationCount()
-            refresh()
         }
     }
 
@@ -99,7 +56,6 @@ fun ProjectListScreen(
                 val created = repository.createProject(name, description, tags)
                 projects = (projects.filterNot { it.id == created.id } + created).sortedBy { it.name }
                 showCreateDialog = false
-                refreshPendingCount()
             } catch (e: Exception) {
                 error = repository.friendlyError(e)
             }
@@ -113,7 +69,6 @@ fun ProjectListScreen(
                 repository.deleteProject(project)
                 projects = projects.filterNot { it.id == project.id }
                 projectToDelete = null
-                refreshPendingCount()
             } catch (e: Exception) {
                 error = repository.friendlyError(e)
                 projectToDelete = null
@@ -128,20 +83,17 @@ fun ProjectListScreen(
                 val updated = repository.updateProject(project, name, description, tags)
                 projects = (projects.filterNot { it.id == updated.id } + updated).sortedBy { it.name }
                 projectToEdit = null
-                refreshPendingCount()
             } catch (e: Exception) {
                 error = repository.friendlyError(e)
             }
         }
     }
 
-    LaunchedEffect(Unit) { refresh() }
+    LaunchedEffect(dataRevision) { refresh() }
 
     AdoScaffold(
         title = "Projects",
         onSettings = onOpenSettings,
-        offlineMode = offlineMode,
-        onToggleOfflineMode = { setOfflineMode(!offlineMode) },
         actions = {
             TextButton(onClick = onOpenTemplates) { Text("Templates") }
         },
@@ -155,22 +107,11 @@ fun ProjectListScreen(
                 label = if (simpleView) "Full" else "Simple",
                 onClick = { simpleView = !simpleView },
             ),
-            BottomBarAction(
-                label = "Sync",
-                onClick = { syncNow() },
-                emphasized = pendingCount > 0,
-            ),
-            BottomBarAction(
-                label = "Queue",
-                onClick = onOpenSync,
-            ),
         ),
     ) { padding ->
         Column(modifier = padding) {
-            if (!offlineMode && error != null && projects.isEmpty()) {
+            if (error != null) {
                 ErrorBanner(message = error ?: "Unable to load projects", onRetry = { refresh() })
-            } else if (!offlineMode && error != null && showingCache) {
-                OfflineBanner("Showing cached projects. ${error.orEmpty()}")
             }
 
             when {
@@ -226,18 +167,6 @@ fun ProjectListScreen(
             initialTags = project.tags,
             onDismiss = { projectToEdit = null },
             onSubmit = { name, description, tags -> updateProject(project, name, description, tags) },
-        )
-    }
-
-    if (showOfflinePrompt) {
-        ConfirmChoiceDialog(
-            title = "Use offline mode?",
-            message = "The server is not reachable. Use cached data and save changes locally?",
-            confirmLabel = "Offline",
-            dismissLabel = "Stay online",
-            onCancel = { showOfflinePrompt = false },
-            onDismiss = { showOfflinePrompt = false },
-            onConfirm = { setOfflineMode(true) },
         )
     }
 }

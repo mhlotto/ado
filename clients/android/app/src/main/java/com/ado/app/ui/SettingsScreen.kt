@@ -1,73 +1,102 @@
 package com.ado.app.ui
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.ui.Alignment
 import androidx.compose.material3.Button
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.ado.app.data.AdoRepository
-import com.ado.app.data.DEFAULT_SERVER_URL
-import com.ado.app.data.SettingsStore
-import com.ado.app.data.normalizeServerUrl
+import com.ado.app.data.ImportPreview
+import java.time.LocalDate
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun SettingsScreen(
-    settingsStore: SettingsStore,
     repository: AdoRepository,
     onBack: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    val savedServerUrl by settingsStore.serverUrlFlow.collectAsState(initial = DEFAULT_SERVER_URL)
-    val offlineMode by repository.offlineModeFlow.collectAsState(initial = false)
+    val context = LocalContext.current
     val rollUpCompleted by repository.rollUpCompletedFlow.collectAsState(initial = true)
-    var serverUrl by remember { mutableStateOf(savedServerUrl) }
     var message by remember { mutableStateOf<String?>(null) }
-    var testing by remember { mutableStateOf(false) }
+    var pendingImport by remember { mutableStateOf<String?>(null) }
+    var pendingPreview by remember { mutableStateOf<ImportPreview?>(null) }
 
-    LaunchedEffect(savedServerUrl) {
-        serverUrl = savedServerUrl
-    }
-
-    fun save() {
+    fun applyImport(raw: String, overwrite: Boolean) {
         scope.launch {
-            settingsStore.saveServerUrl(serverUrl)
-            serverUrl = normalizeServerUrl(serverUrl)
-            message = "Saved."
+            try {
+                val result = repository.importData(raw, overwrite)
+                message = "Imported ${result.imported} items; skipped ${result.skipped}."
+            } catch (e: Exception) {
+                message = repository.friendlyError(e)
+            } finally {
+                pendingImport = null
+                pendingPreview = null
+            }
         }
     }
 
-    fun testConnection() {
-        scope.launch {
-            testing = true
-            message = null
-            settingsStore.saveServerUrl(serverUrl)
-            serverUrl = normalizeServerUrl(serverUrl)
-            try {
-                repository.testConnection()
-                message = "Connection succeeded."
-            } catch (e: Exception) {
-                message = "Connection failed: ${repository.friendlyError(e)}"
-            } finally {
-                testing = false
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri: Uri? ->
+        if (uri != null) {
+            scope.launch {
+                try {
+                    val json = repository.exportData()
+                    withContext(Dispatchers.IO) {
+                        context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(json) }
+                            ?: throw IllegalStateException("Unable to write backup file.")
+                    }
+                    message = "Backup exported."
+                } catch (e: Exception) {
+                    message = repository.friendlyError(e)
+                }
+            }
+        }
+    }
+
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri: Uri? ->
+        if (uri != null) {
+            scope.launch {
+                try {
+                    val raw = withContext(Dispatchers.IO) {
+                        context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                            ?: throw IllegalStateException("Unable to read backup file.")
+                    }
+                    val preview = repository.previewImport(raw)
+                    if (preview.conflicts > 0) {
+                        pendingImport = raw
+                        pendingPreview = preview
+                    } else {
+                        applyImport(raw, overwrite = false)
+                    }
+                } catch (e: Exception) {
+                    message = repository.friendlyError(e)
+                }
             }
         }
     }
@@ -75,58 +104,70 @@ fun SettingsScreen(
     AdoScaffold(
         title = "Settings",
         onBack = onBack,
-        offlineMode = offlineMode,
-        onToggleOfflineMode = {
-            scope.launch {
-                repository.setOfflineMode(!offlineMode)
-            }
-        },
-        actions = {
-            TextButton(onClick = ::testConnection, enabled = !testing) {
-                Text(if (testing) "Testing..." else "Test")
-            }
-        },
     ) { padding ->
         Column(
             modifier = padding
                 .padding(16.dp)
                 .fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
-            OutlinedTextField(
-                value = serverUrl,
-                onValueChange = { serverUrl = it },
-                label = { Text("Server URL") },
-                supportingText = { Text("Default: $DEFAULT_SERVER_URL") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Button(onClick = ::save, modifier = Modifier.padding(top = 12.dp)) {
-                Text("Save")
-            }
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 20.dp),
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Roll up completed entries")
-                    Text("Start finished task and subtask sections collapsed.")
+                    Text(
+                        "Start finished task and subtask sections collapsed.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MutedTextColor,
+                    )
                 }
                 Spacer(modifier = Modifier.width(12.dp))
                 Switch(
                     checked = rollUpCompleted,
                     onCheckedChange = { enabled ->
-                        scope.launch {
-                            repository.setRollUpCompleted(enabled)
-                        }
+                        scope.launch { repository.setRollUpCompleted(enabled) }
                     },
                 )
             }
-            message?.let {
-                Text(text = it, modifier = Modifier.padding(top = 16.dp))
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Data backup", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Export all local projects, tasks, subtasks, and templates to a JSON file, or restore from one.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MutedTextColor,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(onClick = { exportLauncher.launch("ado-backup-${LocalDate.now()}.json") }) {
+                        Text("Export")
+                    }
+                    Button(onClick = { importLauncher.launch(arrayOf("application/json", "text/*")) }) {
+                        Text("Import")
+                    }
+                }
             }
+
+            message?.let { Text(text = it, style = MaterialTheme.typography.bodyMedium) }
         }
+    }
+
+    val preview = pendingPreview
+    val raw = pendingImport
+    if (preview != null && raw != null) {
+        ConfirmChoiceDialog(
+            title = "Matching local data found",
+            message = "${preview.conflicts} imported records match items already on this device. Overwrite matching items or keep the existing local versions?",
+            confirmLabel = "Overwrite",
+            dismissLabel = "Keep existing",
+            onCancel = {
+                pendingImport = null
+                pendingPreview = null
+            },
+            onDismiss = { applyImport(raw, overwrite = false) },
+            onConfirm = { applyImport(raw, overwrite = true) },
+        )
     }
 }

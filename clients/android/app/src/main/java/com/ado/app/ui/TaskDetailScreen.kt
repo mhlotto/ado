@@ -22,7 +22,6 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.ado.app.data.AdoRepository
 import com.ado.app.data.Project
-import com.ado.app.data.SYNC_SYNCED
 import com.ado.app.data.SubTask
 import com.ado.app.data.Task
 import java.time.Instant
@@ -40,55 +39,31 @@ fun TaskDetailScreen(
     var subtasks by remember { mutableStateOf<List<SubTask>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
-    var showingCache by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf<String?>(null) }
     var showCreateSubTaskDialog by remember { mutableStateOf(false) }
     var showEditTaskDialog by remember { mutableStateOf(false) }
     var subTaskToEdit by remember { mutableStateOf<SubTask?>(null) }
     var subTaskToDelete by remember { mutableStateOf<SubTask?>(null) }
     var taskMoveProjects by remember { mutableStateOf<List<Project>>(emptyList()) }
     var subTaskMoveTasks by remember { mutableStateOf<List<Task>>(emptyList()) }
-    var pendingCount by remember { mutableStateOf(0) }
     var simpleView by remember { mutableStateOf(false) }
-    var showOfflinePrompt by remember { mutableStateOf(false) }
-    val offlineMode by repository.offlineModeFlow.collectAsState(initial = false)
     val rollUpCompleted by repository.rollUpCompletedFlow.collectAsState(initial = true)
+    val dataRevision by repository.dataRevisionFlow.collectAsState(initial = 0)
     var finishedExpanded by remember(taskId) { mutableStateOf(!rollUpCompleted) }
 
     fun refresh() {
         scope.launch {
             loading = true
             error = null
-            repository.getTask(taskId).let { result ->
-                task = result.data ?: task
-                val resultError = if (repository.isOfflineMode()) null else result.errorMessage
-                if (resultError != null) {
-                    error = resultError
-                    showingCache = result.fromCache
-                    showOfflinePrompt = true
-                }
+            message = null
+            try {
+                task = repository.getTask(taskId).data ?: task
+                subtasks = repository.getSubTasks(taskId).data
+            } catch (e: Exception) {
+                error = repository.friendlyError(e)
+            } finally {
+                loading = false
             }
-            val cachedSubtasks = repository.getCachedSubTasks(taskId)
-            if (cachedSubtasks.isNotEmpty()) {
-                subtasks = cachedSubtasks
-                showingCache = true
-            }
-            val result = repository.getSubTasks(taskId)
-            subtasks = result.data
-            showingCache = result.fromCache
-            val resultError = if (repository.isOfflineMode()) null else result.errorMessage
-            error = resultError ?: error
-            if (resultError != null) {
-                showOfflinePrompt = true
-            }
-            pendingCount = repository.pendingMutationCount()
-            loading = false
-        }
-    }
-
-    LaunchedEffect(offlineMode) {
-        if (offlineMode) {
-            error = null
-            showOfflinePrompt = false
         }
     }
 
@@ -96,40 +71,14 @@ fun TaskDetailScreen(
         finishedExpanded = !rollUpCompleted
     }
 
-    fun setOfflineMode(enabled: Boolean) {
-        scope.launch {
-            repository.setOfflineMode(enabled)
-            showOfflinePrompt = false
-            error = null
-            refresh()
-        }
-    }
-
-    fun refreshPendingCount() {
-        scope.launch {
-            pendingCount = repository.pendingMutationCount()
-        }
-    }
-
-    fun syncNow() {
-        scope.launch {
-            error = null
-            repository.syncPendingMutations()
-            pendingCount = repository.pendingMutationCount()
-            refresh()
-        }
-    }
-
     fun toggleTask() {
         val current = task ?: return
         scope.launch {
             error = null
+            message = null
             try {
                 val updated = repository.toggleTaskStatus(current)
                 task = updated
-                if (updated.syncStatus != SYNC_SYNCED) {
-                    pendingCount = repository.pendingMutationCount()
-                }
             } catch (e: Exception) {
                 error = repository.friendlyError(e)
             }
@@ -139,12 +88,10 @@ fun TaskDetailScreen(
     fun toggleSubTask(subTask: SubTask) {
         scope.launch {
             error = null
+            message = null
             try {
                 val updated = repository.toggleSubTaskStatus(subTask)
                 subtasks = subtasks.map { if (it.id == updated.id) updated else it }
-                if (updated.syncStatus != SYNC_SYNCED) {
-                    pendingCount = repository.pendingMutationCount()
-                }
             } catch (e: Exception) {
                 error = repository.friendlyError(e)
             }
@@ -154,11 +101,11 @@ fun TaskDetailScreen(
     fun createSubTask(name: String, description: String, tags: List<String>) {
         scope.launch {
             error = null
+            message = null
             try {
                 val created = repository.createSubTask(taskId, name, description)
                 subtasks = subtasks.filterNot { it.id == created.id } + created
                 showCreateSubTaskDialog = false
-                refreshPendingCount()
             } catch (e: Exception) {
                 error = repository.friendlyError(e)
             }
@@ -168,6 +115,7 @@ fun TaskDetailScreen(
     fun createBulkSubTasks(text: String) {
         scope.launch {
             error = null
+            message = null
             val drafts = parseBulkSubTasks(text)
             if (drafts.isEmpty()) {
                 error = "Bulk subtask input did not contain any subtasks."
@@ -178,13 +126,11 @@ fun TaskDetailScreen(
                 for (draft in drafts) {
                     created += repository.createSubTask(taskId, draft.name, draft.description)
                 }
-                subtasks = repository.getCachedSubTasks(taskId)
+                subtasks = repository.getSubTasks(taskId).data
                 showCreateSubTaskDialog = false
-                pendingCount = repository.pendingMutationCount()
-                error = if (created.any { it.syncStatus != SYNC_SYNCED }) null else "Created ${created.size} subtasks."
+                message = "Created ${created.size} subtasks."
             } catch (e: Exception) {
-                subtasks = repository.getCachedSubTasks(taskId)
-                pendingCount = repository.pendingMutationCount()
+                subtasks = repository.getSubTasks(taskId).data
                 error = repository.friendlyError(e)
             }
         }
@@ -193,11 +139,11 @@ fun TaskDetailScreen(
     fun deleteSubTask(subTask: SubTask) {
         scope.launch {
             error = null
+            message = null
             try {
                 repository.deleteSubTask(subTask)
                 subtasks = subtasks.filterNot { it.id == subTask.id }
                 subTaskToDelete = null
-                refreshPendingCount()
             } catch (e: Exception) {
                 error = repository.friendlyError(e)
                 subTaskToDelete = null
@@ -224,13 +170,11 @@ fun TaskDetailScreen(
         val current = task ?: return
         scope.launch {
             error = null
+            message = null
             try {
                 val updated = repository.updateTask(current, name, description, projectId)
                 task = updated
                 showEditTaskDialog = false
-                if (updated.syncStatus != SYNC_SYNCED) {
-                    pendingCount = repository.pendingMutationCount()
-                }
             } catch (e: Exception) {
                 error = repository.friendlyError(e)
             }
@@ -240,6 +184,7 @@ fun TaskDetailScreen(
     fun updateSubTask(subTask: SubTask, name: String, description: String, targetTaskId: String) {
         scope.launch {
             error = null
+            message = null
             try {
                 val updated = repository.updateSubTask(subTask, name, description, targetTaskId)
                 subtasks = if (updated.taskId == taskId) {
@@ -248,23 +193,18 @@ fun TaskDetailScreen(
                     subtasks.filterNot { it.id == updated.id }
                 }
                 subTaskToEdit = null
-                if (updated.syncStatus != SYNC_SYNCED) {
-                    pendingCount = repository.pendingMutationCount()
-                }
             } catch (e: Exception) {
                 error = repository.friendlyError(e)
             }
         }
     }
 
-    LaunchedEffect(taskId) { refresh() }
+    LaunchedEffect(taskId, dataRevision) { refresh() }
 
     AdoScaffold(
         title = "Subtasks",
         onBack = onBack,
         onSettings = onOpenSettings,
-        offlineMode = offlineMode,
-        onToggleOfflineMode = { setOfflineMode(!offlineMode) },
         bottomActions = listOf(
             BottomBarAction(
                 label = "Edit",
@@ -280,21 +220,13 @@ fun TaskDetailScreen(
                 label = if (simpleView) "Full" else "Simple",
                 onClick = { simpleView = !simpleView },
             ),
-            BottomBarAction(
-                label = "Sync",
-                onClick = { syncNow() },
-                emphasized = pendingCount > 0,
-            ),
         ),
     ) { padding ->
         Column(modifier = padding) {
-            if (!offlineMode && error != null && task == null) {
+            if (error != null) {
                 ErrorBanner(message = error ?: "Unable to load task", onRetry = { refresh() })
-            } else if (!offlineMode && error != null && showingCache) {
-                OfflineBanner("Showing cached task. ${error.orEmpty()}")
-            } else if (!offlineMode && error != null) {
-                OfflineBanner(error.orEmpty())
             }
+            message?.let { InfoBanner(it) }
 
             task?.let {
                 TaskHeader(
@@ -412,17 +344,6 @@ fun TaskDetailScreen(
         )
     }
 
-    if (showOfflinePrompt) {
-        ConfirmChoiceDialog(
-            title = "Use offline mode?",
-            message = "The server is not reachable. Use cached data and save changes locally?",
-            confirmLabel = "Offline",
-            dismissLabel = "Stay online",
-            onCancel = { showOfflinePrompt = false },
-            onDismiss = { showOfflinePrompt = false },
-            onConfirm = { setOfflineMode(true) },
-        )
-    }
 }
 
 private fun subTaskFinishedAt(subTask: SubTask): Instant {

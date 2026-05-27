@@ -1,6 +1,6 @@
 # ado
 
-`ado` is a client/server task-list application for daily and longer-term task tracking.
+`ado` is a task-list application for daily and longer-term task tracking. The Android client is now the standalone primary application; the server and static web client remain in the tree as retained implementations.
 
 <img src="clients/android/app/src/main/res/drawable-nodpi/ado_splash.png" alt="ado Android splash screen" width="360">
 
@@ -12,9 +12,9 @@ clients/android/    Kotlin/Jetpack Compose Android client
 clients/web-local/  Plain static HTML/CSS/JS local browser client
 ```
 
-## Server
+## Retained Server
 
-The server is the canonical API and persistence layer. It provides:
+For the retained server-backed `web-local` client, the server is the canonical API and persistence layer. It provides:
 
 - Project, task, and subtask CRUD
 - Core `Daily` and `Home` projects
@@ -45,15 +45,7 @@ Server setup, database scripts, tests, and API examples are in [server/README.md
 This repository does not embed a private LAN server address. Configure the client that you use:
 
 - `clients/web-local/` defaults to `http://localhost:8989`; change its API server URL in the browser settings panel and it is stored in `localStorage`.
-- `clients/android/` defaults to `http://10.0.2.2:8989`, the Android emulator route to a server running on the development machine.
-- For an Android build intended for a physical device, supply a reachable API URL at build time:
-
-```sh
-cd clients/android
-ADO_SERVER_URL=http://api-host.example:8989 make install
-```
-
-The Android Settings screen can also change the URL after installation. If the app already has a URL saved in DataStore, that saved value overrides the build default until it is edited or app data is cleared.
+- `clients/android/` is standalone and does not contain or require an API server URL. Its data lives on the device and can be exported/imported from Settings.
 
 If `web-local` is served from a LAN hostname/origin rather than opened directly or served from `localhost`, allow that origin when starting the server:
 
@@ -62,13 +54,13 @@ cd server
 ADO_CORS_ORIGINS=http://web-host.example:5173 make run-server
 ```
 
-Seeded templates are generic starter content in the public repository and can be edited through either client or the API after database initialization.
+Seeded server templates are generic starter content in the public repository and can be edited through `web-local` or the API after database initialization. Android maintains its own local templates.
 
 The `ado` / `ado` PostgreSQL credential in local development configuration is deliberately a disposable development default. Replace it and provide a corresponding `DATABASE_URL` for any non-local deployment.
 
 ## Clients
 
-Both clients let you change the server URL locally; see Public Configuration above for their non-private defaults.
+`clients/android/` is standalone. `clients/web-local/` remains a server-backed browser client and lets you set its API URL locally.
 
 ### Android
 
@@ -84,11 +76,11 @@ The Android client is built with Kotlin and Jetpack Compose. It includes:
 - Create/edit/delete for projects, tasks, and subtasks
 - Bulk-create tasks and subtasks from pasted text
 - Task/subtask done/todo toggles
-- Room-backed local cache
-- Offline mutation queue for create/edit/delete/toggle
-- Offline queued Daily/Home generation with placeholders
+- Room-backed canonical local data storage
+- JSON export/import backup with overwrite confirmation
+- Local Daily/Home generation and calendar-derived daily items
 - Template list and template edit screens
-- Settings and sync queue screens
+- Settings screen
 
 Build:
 
@@ -149,4 +141,4 @@ More detail is in [clients/web-local/README.md](clients/web-local/README.md).
 
 ## Client Capability Notes
 
-Android is the fuller offline-capable client. `web-local` is intentionally simpler and currently has no offline write queue; creates and toggles require the server, while cached data can still be viewed if the server is unavailable.
+Android is now fully device-local and does not synchronize with the retained server. `web-local` remains server-backed and can display cached reads when the server is unavailable.

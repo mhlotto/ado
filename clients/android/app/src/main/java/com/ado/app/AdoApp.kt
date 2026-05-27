@@ -8,7 +8,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import com.ado.app.data.AdoRepository
-import com.ado.app.data.ApiClient
 import com.ado.app.data.RoomLocalStore
 import com.ado.app.data.SettingsStore
 import com.ado.app.ui.AppNav
@@ -44,7 +43,6 @@ fun AdoApp() {
     val settingsStore = remember { SettingsStore(context) }
     val repository = remember {
         AdoRepository(
-            apiClient = ApiClient(settingsStore),
             localStore = RoomLocalStore(context),
             settingsStore = settingsStore,
         )
@@ -52,7 +50,7 @@ fun AdoApp() {
 
     MaterialTheme(colorScheme = AdoDarkBlueColors) {
         Surface(color = MaterialTheme.colorScheme.background) {
-            AppNav(repository = repository, settingsStore = settingsStore)
+            AppNav(repository = repository)
         }
     }
 }

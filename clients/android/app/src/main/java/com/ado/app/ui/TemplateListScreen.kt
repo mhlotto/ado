@@ -33,58 +33,32 @@ fun TemplateListScreen(
     var templates by remember { mutableStateOf<List<Template>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
-    var showingCache by remember { mutableStateOf(false) }
-    val offlineMode by repository.offlineModeFlow.collectAsState(initial = false)
+    val dataRevision by repository.dataRevisionFlow.collectAsState(initial = 0)
 
     fun refresh() {
         scope.launch {
             loading = true
             error = null
-            val cached = repository.getCachedTemplates()
-            if (cached.isNotEmpty()) {
-                templates = cached
-                showingCache = true
+            try {
+                templates = repository.getTemplates().data
+            } catch (e: Exception) {
+                error = repository.friendlyError(e)
+            } finally {
+                loading = false
             }
-            val result = repository.getTemplates()
-            templates = result.data
-            showingCache = result.fromCache
-            error = if (repository.isOfflineMode()) null else result.errorMessage
-            loading = false
         }
     }
 
-    LaunchedEffect(Unit) { refresh() }
-
-    LaunchedEffect(offlineMode) {
-        if (offlineMode) {
-            error = null
-        }
-    }
+    LaunchedEffect(dataRevision) { refresh() }
 
     AdoScaffold(
         title = "Templates",
         onBack = onBack,
         onSettings = onOpenSettings,
-        offlineMode = offlineMode,
-        onToggleOfflineMode = {
-            scope.launch {
-                repository.setOfflineMode(!offlineMode)
-                error = null
-                refresh()
-            }
-        },
-        bottomActions = listOf(
-            BottomBarAction(
-                label = "Refresh",
-                onClick = { refresh() },
-            ),
-        ),
     ) { padding ->
         Column(modifier = padding) {
-            if (!offlineMode && error != null && templates.isEmpty()) {
+            if (error != null) {
                 ErrorBanner(message = error ?: "Unable to load templates", onRetry = { refresh() })
-            } else if (!offlineMode && error != null && showingCache) {
-                OfflineBanner("Showing cached templates. ${error.orEmpty()}")
             }
 
             when {

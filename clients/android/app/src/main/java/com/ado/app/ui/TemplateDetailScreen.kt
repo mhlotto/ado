@@ -38,11 +38,10 @@ fun TemplateDetailScreen(
     var items by remember { mutableStateOf<List<TemplateItem>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
-    var showingCache by remember { mutableStateOf(false) }
     var showAddDialog by remember { mutableStateOf(false) }
     var itemToEdit by remember { mutableStateOf<TemplateItem?>(null) }
     var itemToDelete by remember { mutableStateOf<TemplateItem?>(null) }
-    val offlineMode by repository.offlineModeFlow.collectAsState(initial = false)
+    val dataRevision by repository.dataRevisionFlow.collectAsState(initial = 0)
 
     fun setTemplate(next: Template?) {
         template = next
@@ -53,11 +52,13 @@ fun TemplateDetailScreen(
         scope.launch {
             loading = true
             error = null
-            val result = repository.getTemplate(templateKey)
-            setTemplate(result.data ?: template)
-            showingCache = result.fromCache
-            error = if (repository.isOfflineMode()) null else result.errorMessage
-            loading = false
+            try {
+                setTemplate(repository.getTemplate(templateKey).data ?: template)
+            } catch (e: Exception) {
+                error = repository.friendlyError(e)
+            } finally {
+                loading = false
+            }
         }
     }
 
@@ -100,26 +101,12 @@ fun TemplateDetailScreen(
         saveItems(mutable)
     }
 
-    LaunchedEffect(templateKey) { refresh() }
-
-    LaunchedEffect(offlineMode) {
-        if (offlineMode) {
-            error = null
-        }
-    }
+    LaunchedEffect(templateKey, dataRevision) { refresh() }
 
     AdoScaffold(
         title = template?.name ?: "Template",
         onBack = onBack,
         onSettings = onOpenSettings,
-        offlineMode = offlineMode,
-        onToggleOfflineMode = {
-            scope.launch {
-                repository.setOfflineMode(!offlineMode)
-                error = null
-                refresh()
-            }
-        },
         bottomActions = listOf(
             BottomBarAction(
                 label = "Add",
@@ -127,19 +114,11 @@ fun TemplateDetailScreen(
                 enabled = template != null,
                 prominent = true,
             ),
-            BottomBarAction(
-                label = "Refresh",
-                onClick = { refresh() },
-            ),
         ),
     ) { padding ->
         Column(modifier = padding) {
-            if (!offlineMode && error != null && template == null) {
+            if (error != null) {
                 ErrorBanner(message = error ?: "Unable to load template", onRetry = { refresh() })
-            } else if (!offlineMode && error != null && showingCache) {
-                OfflineBanner("Showing cached template. ${error.orEmpty()}")
-            } else if (!offlineMode && error != null) {
-                OfflineBanner(error.orEmpty())
             }
 
             template?.let {

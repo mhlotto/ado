@@ -79,8 +79,6 @@ fun AdoScaffold(
     title: String,
     onBack: (() -> Unit)? = null,
     onSettings: (() -> Unit)? = null,
-    offlineMode: Boolean? = null,
-    onToggleOfflineMode: (() -> Unit)? = null,
     actions: (@Composable () -> Unit)? = null,
     bottomActions: List<BottomBarAction> = emptyList(),
     content: @Composable (Modifier) -> Unit,
@@ -96,9 +94,6 @@ fun AdoScaffold(
                         AppBarNavigationSlot(onBack = onBack)
                     },
                     actions = {
-                        if (offlineMode != null && onToggleOfflineMode != null) {
-                            OfflineModeToggle(offlineMode = offlineMode, onToggle = onToggleOfflineMode)
-                        }
                         if (onSettings != null) {
                             TextButton(onClick = onSettings) { Text("Settings") }
                         }
@@ -238,19 +233,6 @@ private fun AppBarNavigationSlot(onBack: (() -> Unit)?) {
 }
 
 @Composable
-fun OfflineModeToggle(offlineMode: Boolean, onToggle: () -> Unit) {
-    Text(
-        text = if (offlineMode) "Offline" else "Online",
-        modifier = Modifier
-            .clickable(onClick = onToggle)
-            .padding(horizontal = 8.dp, vertical = 8.dp),
-        fontWeight = if (offlineMode) FontWeight.Bold else FontWeight.Normal,
-        color = if (offlineMode) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-        style = MaterialTheme.typography.labelLarge,
-    )
-}
-
-@Composable
 fun LoadingState(label: String = "Loading...") {
     Text(
         text = label,
@@ -296,11 +278,11 @@ fun ErrorBanner(message: String, retryLabel: String = "Retry", onRetry: (() -> U
 }
 
 @Composable
-fun OfflineBanner(message: String) {
+fun InfoBanner(message: String) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(12.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
     ) {
         Text(
@@ -328,16 +310,6 @@ private fun formatFinishedAt(finishedAt: String): String? =
     } catch (_: Exception) {
         null
     }
-
-@Composable
-fun SyncAction(pendingCount: Int, onClick: () -> Unit) {
-    TextButton(onClick = onClick) {
-        Text(
-            text = "Sync",
-            fontWeight = if (pendingCount > 0) FontWeight.Bold else FontWeight.Normal,
-        )
-    }
-}
 
 @Composable
 fun OpenDoneStatTiles(
@@ -457,11 +429,7 @@ fun ProjectSimpleRow(project: Project, onClick: () -> Unit) {
     SimpleNameRow(
         name = project.name,
         isDone = false,
-        indicator = when {
-            project.isCore -> "Core"
-            project.displaySyncStatus != null -> project.displaySyncStatus
-            else -> null
-        },
+        indicator = if (project.isCore) "Core" else null,
         onClick = onClick,
     )
 }
@@ -486,9 +454,6 @@ fun ProjectRow(project: Project, onClick: () -> Unit, onEdit: (() -> Unit)? = nu
                         Text(project.name, style = MaterialTheme.typography.titleMedium)
                         if (project.isCore) {
                             Text("Core", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
-                        }
-                        project.displaySyncStatus?.let {
-                            Text(it, color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelMedium)
                         }
                     }
                     if (project.description.isNotBlank()) {
@@ -530,13 +495,6 @@ fun TaskSimpleRow(task: Task, subTaskCounts: OpenDoneCounts? = null, onClick: ()
                 style = MaterialTheme.typography.bodyLarge,
                 textDecoration = if (task.isDone) TextDecoration.LineThrough else TextDecoration.None,
             )
-            task.displaySyncStatus?.let {
-                Text(
-                    text = it,
-                    color = MutedTextColor,
-                    style = MaterialTheme.typography.labelMedium,
-                )
-            }
         }
         if (subTaskCounts != null && subTaskCounts.total > 0) {
             Row(
@@ -595,9 +553,6 @@ fun TaskRow(
                             status = task.status,
                             finishedAt = task.finishedAt.takeIf { showFinishedAt },
                         )
-                        task.displaySyncStatus?.let {
-                            Text(it, color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelMedium)
-                        }
                     }
                 }
                 if (subTaskCounts != null && subTaskCounts.total > 0) {
@@ -618,7 +573,7 @@ fun SubTaskSimpleRow(subTask: SubTask, onClick: () -> Unit, onLongPress: () -> U
     SimpleNameRow(
         name = subTask.name,
         isDone = subTask.isDone,
-        indicator = subTask.displaySyncStatus,
+        indicator = null,
         onClick = onClick,
         onLongPress = onLongPress,
     )
@@ -652,9 +607,6 @@ fun SubTaskRow(
                 status = subTask.status,
                 finishedAt = subTask.finishedAt.takeIf { showFinishedAt },
             )
-            subTask.displaySyncStatus?.let {
-                Text(it, color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelMedium)
-            }
             CompactRowActions(onEdit = onEdit, onDelete = onDelete)
         }
     }

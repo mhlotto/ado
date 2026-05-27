@@ -26,7 +26,6 @@ import com.ado.app.data.AdoRepository
 import com.ado.app.data.CalendarDailyItem
 import com.ado.app.data.CalendarEventReader
 import com.ado.app.data.Project
-import com.ado.app.data.SYNC_SYNCED
 import com.ado.app.data.Task
 import java.time.Instant
 import kotlinx.coroutines.launch
@@ -46,28 +45,23 @@ fun ProjectDetailScreen(
     var tasks by remember { mutableStateOf<List<Task>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
-    var showingCache by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf<String?>(null) }
     var showCreateTaskDialog by remember { mutableStateOf(false) }
     var taskToEdit by remember { mutableStateOf<Task?>(null) }
     var taskToDelete by remember { mutableStateOf<Task?>(null) }
     var taskMoveProjects by remember { mutableStateOf<List<Project>>(emptyList()) }
-    var pendingCount by remember { mutableStateOf(0) }
     var pendingDailyDate by remember { mutableStateOf<String?>(null) }
     var pendingCalendarDailyGeneration by remember { mutableStateOf<PendingDailyGeneration?>(null) }
     var simpleView by remember { mutableStateOf(false) }
     var subTaskCounts by remember { mutableStateOf<Map<String, OpenDoneCounts>>(emptyMap()) }
-    var showOfflinePrompt by remember { mutableStateOf(false) }
-    val offlineMode by repository.offlineModeFlow.collectAsState(initial = false)
     val rollUpCompleted by repository.rollUpCompletedFlow.collectAsState(initial = true)
+    val dataRevision by repository.dataRevisionFlow.collectAsState(initial = 0)
     var finishedExpanded by remember(projectId) { mutableStateOf(!rollUpCompleted) }
 
     fun refreshSubTaskCounts(sourceTasks: List<Task>) {
         scope.launch {
-            val cachedCounts = sourceTasks.associate { it.id to calculateSubTaskCounts(repository.getCachedSubTasks(it.id)) }
-            subTaskCounts = cachedCounts
-            sourceTasks.forEach { task ->
-                val result = repository.getSubTasks(task.id)
-                subTaskCounts = subTaskCounts + (task.id to calculateSubTaskCounts(result.data))
+            subTaskCounts = sourceTasks.associate { task ->
+                task.id to calculateSubTaskCounts(repository.getSubTasks(task.id).data)
             }
         }
     }
@@ -76,41 +70,19 @@ fun ProjectDetailScreen(
         scope.launch {
             loading = true
             error = null
-            repository.getProject(projectId).let { result ->
-                project = result.data ?: project
-                val resultError = if (repository.isOfflineMode()) null else result.errorMessage
-                if (resultError != null) {
-                    error = resultError
-                    showingCache = result.fromCache
-                    showOfflinePrompt = true
+            message = null
+            try {
+                project = repository.getProject(projectId).data ?: project
+                tasks = repository.getTasks(projectId).data
+                refreshSubTaskCounts(tasks)
+                if (messageAfter != null) {
+                    message = messageAfter
                 }
+            } catch (e: Exception) {
+                error = repository.friendlyError(e)
+            } finally {
+                loading = false
             }
-            val cachedTasks = repository.getCachedTasks(projectId)
-            if (cachedTasks.isNotEmpty()) {
-                tasks = cachedTasks
-                showingCache = true
-            }
-            val result = repository.getTasks(projectId)
-            tasks = result.data
-            refreshSubTaskCounts(result.data)
-            showingCache = result.fromCache
-            val resultError = if (repository.isOfflineMode()) null else result.errorMessage
-            error = resultError ?: error
-            if (resultError != null) {
-                showOfflinePrompt = true
-            }
-            pendingCount = repository.pendingMutationCount()
-            loading = false
-            if (messageAfter != null && error == null) {
-                error = messageAfter
-            }
-        }
-    }
-
-    LaunchedEffect(offlineMode) {
-        if (offlineMode) {
-            error = null
-            showOfflinePrompt = false
         }
     }
 
@@ -118,39 +90,13 @@ fun ProjectDetailScreen(
         finishedExpanded = !rollUpCompleted
     }
 
-    fun setOfflineMode(enabled: Boolean) {
-        scope.launch {
-            repository.setOfflineMode(enabled)
-            showOfflinePrompt = false
-            error = null
-            refresh()
-        }
-    }
-
-    fun refreshPendingCount() {
-        scope.launch {
-            pendingCount = repository.pendingMutationCount()
-        }
-    }
-
-    fun syncNow() {
-        scope.launch {
-            error = null
-            repository.syncPendingMutations()
-            pendingCount = repository.pendingMutationCount()
-            refresh()
-        }
-    }
-
     fun toggle(task: Task) {
         scope.launch {
             error = null
+            message = null
             try {
                 val updated = repository.toggleTaskStatus(task)
                 tasks = tasks.map { if (it.id == updated.id) updated else it }
-                if (updated.syncStatus != SYNC_SYNCED) {
-                    pendingCount = repository.pendingMutationCount()
-                }
             } catch (e: Exception) {
                 error = repository.friendlyError(e)
             }
@@ -160,11 +106,11 @@ fun ProjectDetailScreen(
     fun createTask(name: String, description: String, tags: List<String>) {
         scope.launch {
             error = null
+            message = null
             try {
                 val created = repository.createTask(projectId, name, description)
                 tasks = tasks.filterNot { it.id == created.id } + created
                 showCreateTaskDialog = false
-                refreshPendingCount()
                 refresh()
             } catch (e: Exception) {
                 error = repository.friendlyError(e)
@@ -175,6 +121,7 @@ fun ProjectDetailScreen(
     fun createBulkTasks(text: String) {
         scope.launch {
             error = null
+            message = null
             val drafts = parseBulkTasks(text)
             if (drafts.isEmpty()) {
                 error = "Bulk task input did not contain any tasks."
@@ -191,15 +138,13 @@ fun ProjectDetailScreen(
                         createdSubTasks += 1
                     }
                 }
-                tasks = repository.getCachedTasks(projectId)
+                tasks = repository.getTasks(projectId).data
                 refreshSubTaskCounts(tasks)
                 showCreateTaskDialog = false
-                pendingCount = repository.pendingMutationCount()
-                error = if (createdTasks.any { it.syncStatus != SYNC_SYNCED }) null else "Created ${createdTasks.size} tasks and $createdSubTasks subtasks."
+                message = "Created ${createdTasks.size} tasks and $createdSubTasks subtasks."
             } catch (e: Exception) {
-                tasks = repository.getCachedTasks(projectId)
+                tasks = repository.getTasks(projectId).data
                 refreshSubTaskCounts(tasks)
-                pendingCount = repository.pendingMutationCount()
                 error = repository.friendlyError(e)
             }
         }
@@ -208,11 +153,11 @@ fun ProjectDetailScreen(
     fun deleteTask(task: Task) {
         scope.launch {
             error = null
+            message = null
             try {
                 repository.deleteTask(task)
                 tasks = tasks.filterNot { it.id == task.id }
                 taskToDelete = null
-                refreshPendingCount()
                 refresh()
             } catch (e: Exception) {
                 error = repository.friendlyError(e)
@@ -231,6 +176,7 @@ fun ProjectDetailScreen(
     fun updateTask(task: Task, name: String, description: String, targetProjectId: String) {
         scope.launch {
             error = null
+            message = null
             try {
                 val updated = repository.updateTask(task, name, description, targetProjectId)
                 tasks = if (updated.projectId == projectId) {
@@ -239,9 +185,6 @@ fun ProjectDetailScreen(
                     tasks.filterNot { it.id == updated.id }
                 }
                 taskToEdit = null
-                if (updated.syncStatus != SYNC_SYNCED) {
-                    pendingCount = repository.pendingMutationCount()
-                }
             } catch (e: Exception) {
                 error = repository.friendlyError(e)
             }
@@ -251,6 +194,7 @@ fun ProjectDetailScreen(
     fun generateDaily(date: String, carryOver: Boolean, calendarItems: List<CalendarDailyItem> = emptyList(), calendarMessage: String? = null) {
         scope.launch {
             error = null
+            message = null
             try {
                 repository.generateDaily(date, carryOver = carryOver, calendarItems = calendarItems)
                 refresh(calendarMessage)
@@ -306,6 +250,7 @@ fun ProjectDetailScreen(
     fun generateSeasonal(templateKey: String) {
         scope.launch {
             error = null
+            message = null
             try {
                 repository.generateSeasonal(templateKey)
                 refresh()
@@ -315,14 +260,12 @@ fun ProjectDetailScreen(
         }
     }
 
-    LaunchedEffect(projectId) { refresh() }
+    LaunchedEffect(projectId, dataRevision) { refresh() }
 
     AdoScaffold(
         title = "Tasks",
         onBack = onBack,
         onSettings = onOpenSettings,
-        offlineMode = offlineMode,
-        onToggleOfflineMode = { setOfflineMode(!offlineMode) },
         bottomActions = listOf(
             BottomBarAction(
                 label = "Add",
@@ -333,21 +276,13 @@ fun ProjectDetailScreen(
                 label = if (simpleView) "Full" else "Simple",
                 onClick = { simpleView = !simpleView },
             ),
-            BottomBarAction(
-                label = "Sync",
-                onClick = { syncNow() },
-                emphasized = pendingCount > 0,
-            ),
         ),
     ) { padding ->
         Column(modifier = padding) {
-            if (!offlineMode && error != null && tasks.isEmpty()) {
+            if (error != null) {
                 ErrorBanner(message = error ?: "Unable to load tasks", onRetry = { refresh() })
-            } else if (!offlineMode && error != null && showingCache) {
-                OfflineBanner("Showing cached tasks. ${error.orEmpty()}")
-            } else if (!offlineMode && error != null) {
-                OfflineBanner(error.orEmpty())
             }
+            message?.let { InfoBanner(it) }
 
             project?.let {
                 ProjectHeader(
@@ -482,17 +417,6 @@ fun ProjectDetailScreen(
         )
     }
 
-    if (showOfflinePrompt) {
-        ConfirmChoiceDialog(
-            title = "Use offline mode?",
-            message = "The server is not reachable. Use cached data and save changes locally?",
-            confirmLabel = "Offline",
-            dismissLabel = "Stay online",
-            onCancel = { showOfflinePrompt = false },
-            onDismiss = { showOfflinePrompt = false },
-            onConfirm = { setOfflineMode(true) },
-        )
-    }
 }
 
 private data class PendingDailyGeneration(val date: String, val carryOver: Boolean)

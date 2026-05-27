@@ -7,13 +7,12 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.ado.app.data.AdoRepository
-import com.ado.app.data.SettingsStore
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 
 @Composable
-fun AppNav(repository: AdoRepository, settingsStore: SettingsStore) {
+fun AppNav(repository: AdoRepository) {
     val navController = rememberNavController()
 
     NavHost(navController = navController, startDestination = "splash") {
@@ -31,7 +30,6 @@ fun AppNav(repository: AdoRepository, settingsStore: SettingsStore) {
                 repository = repository,
                 onOpenProject = { navController.navigate("project/${it.routePart()}") },
                 onOpenTemplates = { navController.navigate("templates") },
-                onOpenSync = { navController.navigate("sync") },
                 onOpenSettings = { navController.navigate("settings") },
             )
         }
@@ -62,7 +60,6 @@ fun AppNav(repository: AdoRepository, settingsStore: SettingsStore) {
         }
         composable("settings") {
             SettingsScreen(
-                settingsStore = settingsStore,
                 repository = repository,
                 onBack = { navController.popBackStack() },
             )
@@ -72,13 +69,6 @@ fun AppNav(repository: AdoRepository, settingsStore: SettingsStore) {
                 repository = repository,
                 onBack = { navController.popBackStack() },
                 onOpenTemplate = { navController.navigate("template/${it.routePart()}") },
-                onOpenSettings = { navController.navigate("settings") },
-            )
-        }
-        composable("sync") {
-            SyncScreen(
-                repository = repository,
-                onBack = { navController.popBackStack() },
                 onOpenSettings = { navController.navigate("settings") },
             )
         }

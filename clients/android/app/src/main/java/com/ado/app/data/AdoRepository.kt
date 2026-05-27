@@ -6,387 +6,226 @@ import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
 import java.util.UUID
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.MutableStateFlow
+import org.json.JSONArray
+import org.json.JSONObject
 
 private data class DailyGeneratedSubTask(val name: String, val description: String)
-private class OfflineModeException : Exception("offline mode")
-
-data class LoadResult<T>(
-    val data: T,
-    val fromCache: Boolean,
-    val errorMessage: String? = null,
+private data class ImportedDataset(
+    val projects: List<Project>,
+    val tasks: List<Task>,
+    val subtasks: List<SubTask>,
+    val templates: List<Template>,
 )
 
+data class LoadResult<T>(val data: T)
+
+data class ImportPreview(
+    val conflicts: Int,
+    val projects: Int,
+    val tasks: Int,
+    val subtasks: Int,
+    val templates: Int,
+)
+
+data class ImportResult(
+    val imported: Int,
+    val skipped: Int,
+    val conflicts: Int,
+)
+
+/** Android is self-contained. Room is the canonical storage for all app data. */
 class AdoRepository(
-    private val apiClient: ApiClient,
     private val localStore: LocalStore,
     private val settingsStore: SettingsStore,
 ) {
-    val offlineModeFlow: Flow<Boolean> = settingsStore.offlineModeFlow
     val rollUpCompletedFlow: Flow<Boolean> = settingsStore.rollUpCompletedFlow
+    private val dataRevision = MutableStateFlow(0)
+    val dataRevisionFlow: Flow<Int> = dataRevision
 
-    suspend fun setOfflineMode(enabled: Boolean) {
-        settingsStore.saveOfflineMode(enabled)
-    }
+    private var initialized = false
 
     suspend fun setRollUpCompleted(enabled: Boolean) {
         settingsStore.saveRollUpCompleted(enabled)
     }
 
-    suspend fun isOfflineMode(): Boolean = settingsStore.offlineModeFlow.first()
-
     suspend fun getProjects(): LoadResult<List<Project>> {
-        val cached = localStore.getProjects()
-        if (isOfflineMode()) return LoadResult(cached, fromCache = true)
-        return try {
-            val fresh = apiClient.getProjects()
-            val reconciled = fresh.map { reconcileProject(it, preservePending = true) }
-            localStore.saveProjects(reconciled)
-            LoadResult(localStore.getProjects(), fromCache = false)
-        } catch (e: Exception) {
-            LoadResult(cached, fromCache = true, errorMessage = friendlyError(e))
-        }
+        ensureInitialized()
+        return LoadResult(projectsWithCounts())
     }
 
-    suspend fun getCachedProjects(): List<Project> = localStore.getProjects()
-
     suspend fun createProject(name: String, description: String, tags: List<String>): Project {
-        return try {
-            if (isOfflineMode()) throw OfflineModeException()
-            val created = reconcileProject(apiClient.createProject(name, description, tags))
-            localStore.saveProject(created)
-            created
-        } catch (e: Exception) {
-            if (!shouldStoreOffline(e)) throw e
-            val local = Project(
-                id = newId(),
-                serverId = null,
-                name = name,
-                description = description,
-                tags = tags,
-                isCore = false,
-                coreKey = null,
-                createdAt = now(),
-                updatedAt = now(),
-                deletedAt = null,
-                syncStatus = SYNC_PENDING_CREATE,
-            )
-            localStore.saveProject(local)
-            queue(ENTITY_PROJECT, MUTATION_CREATE, local.id)
-            local
+        ensureInitialized()
+        val cleanName = requiredName(name)
+        if (localStore.getProjects().any { it.name.equals(cleanName, ignoreCase = true) }) {
+            throw IllegalArgumentException("A project with that name already exists.")
         }
+        val project = Project(
+            id = newId(),
+            name = cleanName,
+            description = description.trim(),
+            tags = tags.map(String::trim).filter(String::isNotBlank).distinct(),
+            isCore = false,
+            coreKey = null,
+            createdAt = now(),
+            updatedAt = now(),
+            deletedAt = null,
+        )
+        localStore.saveProject(project)
+        return project
     }
 
     suspend fun getProject(projectId: String): LoadResult<Project?> {
-        val cached = localStore.getProject(projectId)
-        if (isOfflineMode()) return LoadResult(cached, fromCache = true)
-        return try {
-            val remoteId = cached?.serverId ?: projectId
-            val fresh = reconcileProject(apiClient.getProject(remoteId), cached?.id, preservePending = true)
-            localStore.saveProject(fresh)
-            LoadResult(fresh, fromCache = false)
-        } catch (e: Exception) {
-            LoadResult(cached, fromCache = true, errorMessage = friendlyError(e))
-        }
+        ensureInitialized()
+        return LoadResult(localStore.getProject(projectId)?.let { withTaskCounts(it) })
     }
 
     suspend fun updateProject(project: Project, name: String, description: String, tags: List<String>): Project {
-        val local = project.copy(
-            name = name,
-            description = description,
-            tags = tags,
-            updatedAt = now(),
-            syncStatus = if (project.syncStatus == SYNC_PENDING_CREATE) SYNC_PENDING_CREATE else SYNC_PENDING_UPDATE,
-        )
-        return try {
-            if (isOfflineMode()) throw OfflineModeException()
-            val remoteId = project.serverId ?: throw IllegalStateException("project has not synced yet")
-            val updated = reconcileProject(apiClient.updateProject(remoteId, name, description, tags), project.id)
-            localStore.saveProject(updated)
-            updated
-        } catch (e: Exception) {
-            if (!shouldStoreOffline(e)) throw e
-            localStore.saveProject(local)
-            if (project.syncStatus != SYNC_PENDING_CREATE) {
-                queue(ENTITY_PROJECT, MUTATION_UPDATE, project.id)
-            }
-            local
+        ensureInitialized()
+        val cleanName = requiredName(name)
+        if (project.isCore && cleanName != project.name) {
+            throw IllegalArgumentException("Core projects cannot be renamed.")
         }
+        if (localStore.getProjects().any { it.id != project.id && it.name.equals(cleanName, ignoreCase = true) }) {
+            throw IllegalArgumentException("A project with that name already exists.")
+        }
+        val updated = project.copy(
+            name = cleanName,
+            description = description.trim(),
+            tags = tags.map(String::trim).filter(String::isNotBlank).distinct(),
+            updatedAt = now(),
+        )
+        localStore.saveProject(updated)
+        return withTaskCounts(updated)
     }
 
     suspend fun deleteProject(project: Project) {
-        if (project.serverId == null || project.syncStatus == SYNC_PENDING_CREATE) {
-            localStore.deleteProject(project.id)
-            localStore.deletePendingMutationsForLocalId(project.id)
-            return
-        }
-        try {
-            if (isOfflineMode()) throw OfflineModeException()
-            apiClient.deleteProject(project.serverId)
-            localStore.deleteProject(project.id)
-        } catch (e: Exception) {
-            if (!shouldStoreOffline(e)) throw e
-            localStore.saveProject(project.copy(syncStatus = SYNC_PENDING_DELETE, deletedAt = now(), updatedAt = now()))
-            queue(ENTITY_PROJECT, MUTATION_DELETE, project.id)
-        }
+        ensureInitialized()
+        if (project.isCore) throw IllegalArgumentException("Core projects cannot be deleted.")
+        localStore.getTasks(project.id).forEach { localStore.deleteTask(it) }
+        localStore.deleteProject(project.id)
     }
 
     suspend fun getTasks(projectId: String): LoadResult<List<Task>> {
-        val cached = localStore.getTasks(projectId)
-        if (isOfflineMode()) return LoadResult(cached, fromCache = true)
-        return try {
-            val project = localStore.getProject(projectId)
-            val remoteProjectId = project?.serverId ?: projectId
-            val fresh = apiClient.getTasks(remoteProjectId).map { reconcileTask(it, projectId, preservePending = true) }
-            localStore.saveTasks(projectId, fresh)
-            LoadResult(localStore.getTasks(projectId), fromCache = false)
-        } catch (e: Exception) {
-            LoadResult(cached, fromCache = true, errorMessage = friendlyError(e))
-        }
+        ensureInitialized()
+        return LoadResult(localStore.getTasks(projectId))
     }
 
-    suspend fun getCachedTasks(projectId: String): List<Task> = localStore.getTasks(projectId)
-
     suspend fun getTaskMoveProjectOptions(): List<Project> {
-        val cached = localStore.getProjects()
-        if (cached.isNotEmpty() || isOfflineMode()) {
-            return cached.filterNot { it.syncStatus == SYNC_PENDING_DELETE }.sortedBy { it.name.lowercase() }
-        }
-        return getProjects().data.filterNot { it.syncStatus == SYNC_PENDING_DELETE }.sortedBy { it.name.lowercase() }
+        ensureInitialized()
+        return localStore.getProjects().sortedBy { it.name.lowercase() }
     }
 
     suspend fun getSubTaskMoveTaskOptions(): List<Task> {
-        val projects = getTaskMoveProjectOptions()
-        if (!isOfflineMode()) {
-            projects.forEach { project ->
-                getTasks(project.id)
-            }
-        }
-        return projects
-            .flatMap { localStore.getTasks(it.id) }
-            .filterNot { it.syncStatus == SYNC_PENDING_DELETE }
-            .sortedWith(compareBy<Task> { it.name.lowercase() }.thenBy { it.createdAt })
+        ensureInitialized()
+        return localStore.getProjects().flatMap { localStore.getTasks(it.id) }
+            .sortedBy { it.name.lowercase() }
     }
 
     suspend fun createTask(projectId: String, name: String, description: String): Task {
-        val project = localStore.getProject(projectId)
-        return try {
-            if (isOfflineMode()) throw OfflineModeException()
-            val remoteProjectId = project?.serverId ?: projectId
-            val created = reconcileTask(apiClient.createTask(remoteProjectId, name, description), projectId)
-            localStore.saveTask(created)
-            created
-        } catch (e: Exception) {
-            if (!shouldStoreOffline(e)) throw e
-            val task = Task(
-                id = newId(),
-                serverId = null,
-                projectId = projectId,
-                name = name,
-                description = description,
-                status = STATUS_TODO,
-                createdAt = now(),
-                finishedAt = null,
-                updatedAt = now(),
-                deletedAt = null,
-                syncStatus = SYNC_PENDING_CREATE,
-            )
-            localStore.saveTask(task)
-            queue(ENTITY_TASK, MUTATION_CREATE, task.id)
-            task
-        }
+        ensureInitialized()
+        requireProject(projectId)
+        val task = Task(
+            id = newId(),
+            projectId = projectId,
+            name = requiredName(name),
+            description = description.trim(),
+            status = STATUS_TODO,
+            createdAt = now(),
+            finishedAt = null,
+            updatedAt = now(),
+            deletedAt = null,
+        )
+        localStore.saveTask(task)
+        return task
     }
 
     suspend fun getTask(taskId: String): LoadResult<Task?> {
-        val cached = localStore.getTask(taskId)
-        if (isOfflineMode()) return LoadResult(cached, fromCache = true)
-        return try {
-            val remoteId = cached?.serverId ?: taskId
-            val fresh = reconcileTask(apiClient.getTask(remoteId), cached?.projectId, cached?.id, preservePending = true)
-            localStore.saveTask(fresh)
-            LoadResult(fresh, fromCache = false)
-        } catch (e: Exception) {
-            LoadResult(cached, fromCache = true, errorMessage = friendlyError(e))
-        }
+        ensureInitialized()
+        return LoadResult(localStore.getTask(taskId))
     }
 
     suspend fun updateTask(task: Task, name: String, description: String, projectId: String = task.projectId): Task {
-        val local = task.copy(
+        ensureInitialized()
+        requireProject(projectId)
+        val updated = task.copy(
             projectId = projectId,
-            name = name,
-            description = description,
+            name = requiredName(name),
+            description = description.trim(),
             updatedAt = now(),
-            syncStatus = pendingUpdateStatus(task.syncStatus),
         )
-        return try {
-            if (isOfflineMode()) throw OfflineModeException()
-            val remoteId = task.serverId ?: throw IllegalStateException("task has not synced yet")
-            val remoteProjectId = remoteProjectId(projectId)
-            val updated = reconcileTask(apiClient.updateTask(remoteId, name, description, remoteProjectId), projectId, task.id)
-            localStore.saveTask(updated)
-            updated
-        } catch (e: Exception) {
-            if (!shouldStoreOffline(e)) throw e
-            localStore.saveTask(local)
-            if (task.syncStatus != SYNC_PENDING_CREATE) {
-                queue(ENTITY_TASK, MUTATION_UPDATE, task.id)
-            }
-            local
-        }
+        localStore.saveTask(updated)
+        return updated
     }
 
     suspend fun deleteTask(task: Task) {
-        if (task.serverId == null || task.syncStatus == SYNC_PENDING_CREATE) {
-            localStore.deleteTask(task)
-            localStore.deletePendingMutationsForLocalId(task.id)
-            return
-        }
-        try {
-            if (isOfflineMode()) throw OfflineModeException()
-            apiClient.deleteTask(task.serverId)
-            localStore.deleteTask(task)
-        } catch (e: Exception) {
-            if (!shouldStoreOffline(e)) throw e
-            localStore.saveTask(task.copy(syncStatus = SYNC_PENDING_DELETE, deletedAt = now(), updatedAt = now()))
-            queue(ENTITY_TASK, MUTATION_DELETE, task.id)
-        }
+        ensureInitialized()
+        localStore.deleteTask(task)
     }
 
     suspend fun getSubTasks(taskId: String): LoadResult<List<SubTask>> {
-        val cached = localStore.getSubTasks(taskId)
-        if (isOfflineMode()) return LoadResult(cached, fromCache = true)
-        return try {
-            val task = localStore.getTask(taskId)
-            val remoteTaskId = task?.serverId ?: taskId
-            val fresh = apiClient.getSubTasks(remoteTaskId).map { reconcileSubTask(it, taskId, preservePending = true) }
-            localStore.saveSubTasks(taskId, fresh)
-            LoadResult(localStore.getSubTasks(taskId), fromCache = false)
-        } catch (e: Exception) {
-            LoadResult(cached, fromCache = true, errorMessage = friendlyError(e))
-        }
+        ensureInitialized()
+        return LoadResult(localStore.getSubTasks(taskId))
     }
 
-    suspend fun getCachedSubTasks(taskId: String): List<SubTask> = localStore.getSubTasks(taskId)
-
     suspend fun createSubTask(taskId: String, name: String, description: String): SubTask {
-        val task = localStore.getTask(taskId)
-        return try {
-            if (isOfflineMode()) throw OfflineModeException()
-            val remoteTaskId = task?.serverId ?: taskId
-            val created = reconcileSubTask(apiClient.createSubTask(remoteTaskId, name, description), taskId)
-            localStore.saveSubTask(created)
-            created
-        } catch (e: Exception) {
-            if (!shouldStoreOffline(e)) throw e
-            val subTask = SubTask(
-                id = newId(),
-                serverId = null,
-                taskId = taskId,
-                name = name,
-                description = description,
-                status = STATUS_TODO,
-                createdAt = now(),
-                finishedAt = null,
-                updatedAt = now(),
-                deletedAt = null,
-                syncStatus = SYNC_PENDING_CREATE,
-            )
-            localStore.saveSubTask(subTask)
-            queue(ENTITY_SUBTASK, MUTATION_CREATE, subTask.id)
-            subTask
-        }
+        ensureInitialized()
+        requireTask(taskId)
+        val subTask = SubTask(
+            id = newId(),
+            taskId = taskId,
+            name = requiredName(name),
+            description = description.trim(),
+            status = STATUS_TODO,
+            createdAt = now(),
+            finishedAt = null,
+            updatedAt = now(),
+            deletedAt = null,
+        )
+        localStore.saveSubTask(subTask)
+        return subTask
     }
 
     suspend fun updateSubTask(subTask: SubTask, name: String, description: String, taskId: String = subTask.taskId): SubTask {
-        val local = subTask.copy(
+        ensureInitialized()
+        requireTask(taskId)
+        val updated = subTask.copy(
             taskId = taskId,
-            name = name,
-            description = description,
+            name = requiredName(name),
+            description = description.trim(),
             updatedAt = now(),
-            syncStatus = pendingUpdateStatus(subTask.syncStatus),
         )
-        return try {
-            if (isOfflineMode()) throw OfflineModeException()
-            val remoteId = subTask.serverId ?: throw IllegalStateException("subtask has not synced yet")
-            val remoteTaskId = remoteTaskId(taskId)
-            val updated = reconcileSubTask(apiClient.updateSubTask(remoteId, name, description, remoteTaskId), taskId, subTask.id)
-            localStore.saveSubTask(updated)
-            updated
-        } catch (e: Exception) {
-            if (!shouldStoreOffline(e)) throw e
-            localStore.saveSubTask(local)
-            if (subTask.syncStatus != SYNC_PENDING_CREATE) {
-                queue(ENTITY_SUBTASK, MUTATION_UPDATE, subTask.id)
-            }
-            local
-        }
+        localStore.saveSubTask(updated)
+        return updated
     }
 
     suspend fun deleteSubTask(subTask: SubTask) {
-        if (subTask.serverId == null || subTask.syncStatus == SYNC_PENDING_CREATE) {
-            localStore.deleteSubTask(subTask)
-            localStore.deletePendingMutationsForLocalId(subTask.id)
-            return
-        }
-        try {
-            if (isOfflineMode()) throw OfflineModeException()
-            apiClient.deleteSubTask(subTask.serverId)
-            localStore.deleteSubTask(subTask)
-        } catch (e: Exception) {
-            if (!shouldStoreOffline(e)) throw e
-            localStore.saveSubTask(subTask.copy(syncStatus = SYNC_PENDING_DELETE, deletedAt = now(), updatedAt = now()))
-            queue(ENTITY_SUBTASK, MUTATION_DELETE, subTask.id)
-        }
+        ensureInitialized()
+        localStore.deleteSubTask(subTask)
     }
 
     suspend fun toggleTaskStatus(task: Task): Task {
+        ensureInitialized()
         val status = toggledStatus(task.status)
-        val local = task.copy(
+        val updated = task.copy(
             status = status,
             finishedAt = if (status == STATUS_DONE) now() else null,
             updatedAt = now(),
-            syncStatus = pendingUpdateStatus(task.syncStatus),
         )
-        return try {
-            if (isOfflineMode()) throw OfflineModeException()
-            val remoteId = task.serverId ?: throw IllegalStateException("task has not synced yet")
-            apiClient.patchTaskStatus(remoteId, status)
-            val updated = reconcileTask(apiClient.getTask(remoteId), task.projectId, task.id)
-            localStore.saveTask(updated)
-            updated
-        } catch (e: Exception) {
-            if (!shouldStoreOffline(e)) throw e
-            localStore.saveTask(local)
-            if (task.syncStatus != SYNC_PENDING_CREATE) {
-                queue(ENTITY_TASK, MUTATION_UPDATE, task.id)
-            }
-            local
-        }
+        localStore.saveTask(updated)
+        return updated
     }
 
     suspend fun toggleSubTaskStatus(subTask: SubTask): SubTask {
+        ensureInitialized()
         val status = toggledStatus(subTask.status)
-        val local = subTask.copy(
+        val updated = subTask.copy(
             status = status,
             finishedAt = if (status == STATUS_DONE) now() else null,
             updatedAt = now(),
-            syncStatus = pendingUpdateStatus(subTask.syncStatus),
         )
-        return try {
-            if (isOfflineMode()) throw OfflineModeException()
-            val remoteId = subTask.serverId ?: throw IllegalStateException("subtask has not synced yet")
-            apiClient.patchSubTaskStatus(remoteId, status)
-            val updated = reconcileSubTask(apiClient.getSubTask(remoteId), subTask.taskId, subTask.id)
-            localStore.saveSubTask(updated)
-            updated
-        } catch (e: Exception) {
-            if (!shouldStoreOffline(e)) throw e
-            localStore.saveSubTask(local)
-            if (subTask.syncStatus != SYNC_PENDING_CREATE) {
-                queue(ENTITY_SUBTASK, MUTATION_UPDATE, subTask.id)
-            }
-            local
-        }
+        localStore.saveSubTask(updated)
+        return updated
     }
 
     suspend fun generateDailyToday(carryOver: Boolean = false) {
@@ -396,637 +235,276 @@ class AdoRepository(
     fun dailyTargetDate(dateAlias: String): LocalDate = resolveDailyTargetDate(dateAlias)
 
     suspend fun generateDaily(
-        dateAlias: String,
+        date: String,
         carryOver: Boolean = false,
         calendarItems: List<CalendarDailyItem> = emptyList(),
     ) {
-        generateDaily(resolveDailyTargetDate(dateAlias), carryOver, calendarItems)
+        ensureInitialized()
+        val targetDate = resolveDailyTargetDate(date)
+        val dailyProject = coreProject("daily")
+        if (localStore.getTasks(dailyProject.id).any { dailyTaskDate(it.name) == targetDate }) {
+            throw IllegalArgumentException("That daily list already exists.")
+        }
+        val template = localStore.getTemplate("daily") ?: throw IllegalStateException("Daily template not found.")
+        val defaults = template.items.sortedBy { it.position }.map { DailyGeneratedSubTask(it.name, it.description) }
+        val carried = if (carryOver) dailyCarryOver(dailyProject.id, targetDate, defaults.map { it.name }.toSet()) else emptyList()
+        val fromCalendar = calendarItems.map { DailyGeneratedSubTask(it.name, it.description) }
+        createGeneratedTask(dailyProject.id, dailyTaskName(targetDate), defaults + carried + fromCalendar)
     }
 
     suspend fun generateSeasonal(templateKey: String) {
-        generateSeasonal(templateKey, LocalDate.now().year)
+        ensureInitialized()
+        val template = localStore.getTemplate(templateKey) ?: throw IllegalArgumentException("Template not found.")
+        val homeProject = coreProject("home")
+        val name = when (templateKey) {
+            "summer_chores" -> "Summer chores ${LocalDate.now().year}"
+            "fall_chores" -> "Fall chores ${LocalDate.now().year}"
+            "winter_chores" -> "Winter chores ${LocalDate.now().year}"
+            "spring_chores" -> "Spring chores ${LocalDate.now().year}"
+            "leaving_house" -> "Leaving house"
+            else -> template.name
+        }
+        if (localStore.getTasks(homeProject.id).any { it.name == name }) {
+            throw IllegalArgumentException("That list already exists.")
+        }
+        createGeneratedTask(
+            projectId = homeProject.id,
+            name = name,
+            items = template.items.sortedBy { it.position }.map { DailyGeneratedSubTask(it.name, it.description) },
+        )
     }
 
     suspend fun getTemplates(): LoadResult<List<Template>> {
-        val cached = localStore.getTemplates()
-        if (isOfflineMode()) return LoadResult(cached, fromCache = true)
-        return try {
-            val fresh = apiClient.getTemplates()
-            localStore.saveTemplates(fresh)
-            LoadResult(fresh, fromCache = false)
-        } catch (e: Exception) {
-            LoadResult(cached, fromCache = true, errorMessage = friendlyError(e))
-        }
+        ensureInitialized()
+        return LoadResult(localStore.getTemplates())
     }
 
-    suspend fun getCachedTemplates(): List<Template> = localStore.getTemplates()
-
     suspend fun getTemplate(templateKey: String): LoadResult<Template?> {
-        val cached = localStore.getTemplate(templateKey)
-        if (isOfflineMode()) return LoadResult(cached, fromCache = true)
-        return try {
-            val fresh = apiClient.getTemplate(templateKey)
-            localStore.saveTemplate(fresh)
-            LoadResult(fresh, fromCache = false)
-        } catch (e: Exception) {
-            LoadResult(cached, fromCache = true, errorMessage = friendlyError(e))
-        }
+        ensureInitialized()
+        return LoadResult(localStore.getTemplate(templateKey))
     }
 
     suspend fun updateTemplateItems(template: Template, items: List<TemplateItem>): Template {
-        if (isOfflineMode()) throw OfflineModeException()
-        val updated = apiClient.updateTemplateItems(template.templateKey, items)
+        ensureInitialized()
+        val updated = template.copy(
+            items = items.mapIndexed { index, item ->
+                item.copy(id = item.id ?: newId(), position = index)
+            },
+        )
         localStore.saveTemplate(updated)
         return updated
     }
 
-    suspend fun testConnection(): Boolean {
-        val ok = apiClient.testConnection()
-        if (ok) setOfflineMode(false)
-        return ok
+    suspend fun exportData(): String {
+        ensureInitialized()
+        val projects = localStore.getProjects()
+        val tasks = projects.flatMap { localStore.getTasks(it.id) }
+        val subtasks = tasks.flatMap { localStore.getSubTasks(it.id) }
+        val root = JSONObject()
+            .put("format", "ado-local-export")
+            .put("version", 1)
+            .put("exported_at", now())
+            .put("projects", projects.map(::exportProject).asArray())
+            .put("tasks", tasks.map(::exportTask).asArray())
+            .put("subtasks", subtasks.map(::exportSubTask).asArray())
+            .put("templates", localStore.getTemplates().map { it.toJson() }.asArray())
+        return root.toString(2)
     }
 
-    suspend fun pendingMutationCount(): Int = localStore.pendingMutationCount()
-
-    suspend fun pendingMutations(): List<PendingMutation> = localStore.getPendingMutations()
-
-    suspend fun syncPendingMutations(): SyncResult {
-        if (isOfflineMode()) {
-            return SyncResult(localStore.pendingMutationCount(), 0, 0)
-        }
-        val mutations = localStore.getPendingMutations().sortedWith(mutationComparator())
-        var synced = 0
-        var failed = 0
-        for (mutation in mutations) {
-            try {
-                val completed = replayMutation(mutation)
-                if (completed) {
-                    localStore.deletePendingMutation(mutation.id)
-                    synced += 1
-                } else {
-                    failed += 1
-                    localStore.updatePendingMutationFailure(
-                        mutation.id,
-                        mutation.attempts + 1,
-                        "Waiting for parent item to sync.",
-                    )
-                }
-            } catch (e: Exception) {
-                failed += 1
-                localStore.updatePendingMutationFailure(
-                    mutation.id,
-                    mutation.attempts + 1,
-                    friendlyError(e),
-                )
-            }
-        }
-        return SyncResult(mutations.size, synced, failed)
+    suspend fun previewImport(json: String): ImportPreview {
+        ensureInitialized()
+        val incoming = parseImport(json)
+        val existingProjects = localStore.getProjects()
+        val existingTasks = existingProjects.flatMap { localStore.getTasks(it.id) }
+        val existingSubTasks = existingTasks.flatMap { localStore.getSubTasks(it.id) }
+        val existingTemplates = localStore.getTemplates()
+        val conflicts = incoming.projects.count { imported -> existingProjects.any { it.id == imported.id || (imported.coreKey != null && it.coreKey == imported.coreKey) } } +
+            incoming.tasks.count { imported -> existingTasks.any { it.id == imported.id } } +
+            incoming.subtasks.count { imported -> existingSubTasks.any { it.id == imported.id } } +
+            incoming.templates.count { imported -> existingTemplates.any { it.templateKey == imported.templateKey } }
+        return ImportPreview(conflicts, incoming.projects.size, incoming.tasks.size, incoming.subtasks.size, incoming.templates.size)
     }
 
-    fun friendlyError(error: Throwable): String {
-        if (error is AdoApiException) {
-            if (error.statusCode == 409) return "That list already exists."
-            return error.message
-        }
-        return error.message ?: "Request failed"
-    }
-
-    private suspend fun replayMutation(mutation: PendingMutation): Boolean {
-        return when (mutation.entityType to mutation.operation) {
-            ENTITY_PROJECT to MUTATION_CREATE -> syncCreateProject(mutation.localId)
-            ENTITY_PROJECT to MUTATION_UPDATE -> syncUpdateProject(mutation.localId)
-            ENTITY_PROJECT to MUTATION_DELETE -> syncDeleteProject(mutation.localId)
-            ENTITY_TASK to MUTATION_CREATE -> syncCreateTask(mutation.localId)
-            ENTITY_TASK to MUTATION_UPDATE -> syncUpdateTask(mutation.localId)
-            ENTITY_TASK to MUTATION_DELETE -> syncDeleteTask(mutation.localId)
-            ENTITY_SUBTASK to MUTATION_CREATE -> syncCreateSubTask(mutation.localId)
-            ENTITY_SUBTASK to MUTATION_UPDATE -> syncUpdateSubTask(mutation.localId)
-            ENTITY_SUBTASK to MUTATION_DELETE -> syncDeleteSubTask(mutation.localId)
-            ENTITY_GENERATION to MUTATION_GENERATE -> syncGenerate(mutation)
-            else -> true
-        }
-    }
-
-    private suspend fun syncCreateProject(localId: String): Boolean {
-        val project = localStore.getProject(localId) ?: return true
-        if (project.serverId != null) return true
-        val created = apiClient.createProject(project.name, project.description, project.tags)
-        localStore.saveProject(project.copy(serverId = created.id, syncStatus = SYNC_SYNCED, createdAt = created.createdAt, updatedAt = created.updatedAt))
-        return true
-    }
-
-    private suspend fun syncUpdateProject(localId: String): Boolean {
-        val project = localStore.getProject(localId) ?: return true
-        val remoteId = project.serverId ?: return false
-        val updated = reconcileProject(apiClient.updateProject(remoteId, project.name, project.description, project.tags), project.id)
-        localStore.saveProject(updated)
-        return true
-    }
-
-    private suspend fun syncDeleteProject(localId: String): Boolean {
-        val project = localStore.getProject(localId) ?: return true
-        project.serverId?.let { apiClient.deleteProject(it) }
-        localStore.deleteProject(localId)
-        return true
-    }
-
-    private suspend fun syncCreateTask(localId: String): Boolean {
-        val task = localStore.getTask(localId) ?: return true
-        if (task.serverId != null) return true
-        val project = localStore.getProject(task.projectId) ?: return false
-        val remoteProjectId = project.serverId ?: return false
-        var created = apiClient.createTask(remoteProjectId, task.name, task.description)
-        if (task.status != created.status) {
-            created = apiClient.patchTaskStatus(created.id, task.status)
-        }
-        localStore.saveTask(task.copy(
-            serverId = created.id,
-            status = created.status,
-            finishedAt = created.finishedAt,
-            createdAt = created.createdAt,
-            updatedAt = created.updatedAt,
-            syncStatus = SYNC_SYNCED,
-        ))
-        return true
-    }
-
-    private suspend fun syncUpdateTask(localId: String): Boolean {
-        val task = localStore.getTask(localId) ?: return true
-        val remoteId = task.serverId ?: return false
-        val remoteProjectId = localStore.getProject(task.projectId)?.serverId ?: return false
-        apiClient.updateTask(remoteId, task.name, task.description, remoteProjectId)
-        val updated = reconcileTask(apiClient.patchTaskStatus(remoteId, task.status), task.projectId, task.id)
-        localStore.saveTask(updated)
-        return true
-    }
-
-    private suspend fun syncDeleteTask(localId: String): Boolean {
-        val task = localStore.getTask(localId) ?: return true
-        task.serverId?.let { apiClient.deleteTask(it) }
-        localStore.deleteTask(task)
-        return true
-    }
-
-    private suspend fun syncCreateSubTask(localId: String): Boolean {
-        val subTask = localStore.getSubTask(localId) ?: return true
-        if (subTask.serverId != null) return true
-        val task = localStore.getTask(subTask.taskId) ?: return false
-        val remoteTaskId = task.serverId ?: return false
-        var created = apiClient.createSubTask(remoteTaskId, subTask.name, subTask.description)
-        if (subTask.status != created.status) {
-            created = apiClient.patchSubTaskStatus(created.id, subTask.status)
-        }
-        localStore.saveSubTask(subTask.copy(
-            serverId = created.id,
-            status = created.status,
-            finishedAt = created.finishedAt,
-            createdAt = created.createdAt,
-            updatedAt = created.updatedAt,
-            syncStatus = SYNC_SYNCED,
-        ))
-        return true
-    }
-
-    private suspend fun syncUpdateSubTask(localId: String): Boolean {
-        val subTask = localStore.getSubTask(localId) ?: return true
-        val remoteId = subTask.serverId ?: return false
-        val remoteTaskId = localStore.getTask(subTask.taskId)?.serverId ?: return false
-        apiClient.updateSubTask(remoteId, subTask.name, subTask.description, remoteTaskId)
-        val updated = reconcileSubTask(apiClient.patchSubTaskStatus(remoteId, subTask.status), subTask.taskId, subTask.id)
-        localStore.saveSubTask(updated)
-        return true
-    }
-
-    private suspend fun syncDeleteSubTask(localId: String): Boolean {
-        val subTask = localStore.getSubTask(localId) ?: return true
-        subTask.serverId?.let { apiClient.deleteSubTask(it) }
-        localStore.deleteSubTask(subTask)
-        return true
-    }
-
-    private suspend fun reconcileProject(remote: Project, localId: String? = null, preservePending: Boolean = false): Project {
-        val existing = localId?.let { localStore.getProject(it) } ?: remote.serverId?.let { localStore.getProjectByServerId(it) }
-        if (preservePending && existing?.syncStatus != null && existing.syncStatus != SYNC_SYNCED) {
-            return existing
-        }
-        return remote.copy(id = existing?.id ?: remote.id, serverId = remote.serverId ?: remote.id, syncStatus = SYNC_SYNCED)
-    }
-
-    private suspend fun reconcileTask(
-        remote: Task,
-        projectId: String? = null,
-        localId: String? = null,
-        preservePending: Boolean = false,
-    ): Task {
-        val existing = localId?.let { localStore.getTask(it) } ?: remote.serverId?.let { localStore.getTaskByServerId(it) }
-        if (preservePending && existing?.syncStatus != null && existing.syncStatus != SYNC_SYNCED) {
-            return existing
-        }
-        return remote.copy(
-            id = existing?.id ?: remote.id,
-            serverId = remote.serverId ?: remote.id,
-            projectId = projectId ?: existing?.projectId ?: remote.projectId,
-            syncStatus = SYNC_SYNCED,
-        )
-    }
-
-    private suspend fun reconcileSubTask(
-        remote: SubTask,
-        taskId: String? = null,
-        localId: String? = null,
-        preservePending: Boolean = false,
-    ): SubTask {
-        val existing = localId?.let { localStore.getSubTask(it) } ?: remote.serverId?.let { localStore.getSubTaskByServerId(it) }
-        if (preservePending && existing?.syncStatus != null && existing.syncStatus != SYNC_SYNCED) {
-            return existing
-        }
-        return remote.copy(
-            id = existing?.id ?: remote.id,
-            serverId = remote.serverId ?: remote.id,
-            taskId = taskId ?: existing?.taskId ?: remote.taskId,
-            syncStatus = SYNC_SYNCED,
-        )
-    }
-
-    private suspend fun remoteProjectId(projectId: String): String {
-        val project = localStore.getProject(projectId)
-        return project?.serverId ?: throw IllegalStateException("target project has not synced yet")
-    }
-
-    private suspend fun remoteTaskId(taskId: String): String {
-        val task = localStore.getTask(taskId)
-        return task?.serverId ?: throw IllegalStateException("target task has not synced yet")
-    }
-
-    private suspend fun generateDaily(
-        date: LocalDate,
-        carryOver: Boolean,
-        calendarItems: List<CalendarDailyItem> = emptyList(),
-    ) {
-        val project = localStore.getProjects().firstOrNull { it.coreKey == "daily" }
-        val dateName = date.format(DateTimeFormatter.ISO_LOCAL_DATE)
-        val taskName = dailyTaskName(date)
-        val carryOverItems = if (carryOver && project != null) dailyCarryOverItems(project, date) else emptyList()
-        val normalizedCalendarItems = dedupeGeneratedSubTasks(calendarItems.map { it.toGeneratedSubTask() })
-        val payload = generationPayload("daily", "date", dateName, carryOverItems, normalizedCalendarItems)
-        try {
-            if (isOfflineMode()) throw OfflineModeException()
-            val generated = apiClient.generateDaily(dateName)
-            if (project != null && (carryOverItems.isNotEmpty() || normalizedCalendarItems.isNotEmpty())) {
-                addExtraItemsToGeneratedDaily(project, generated, carryOverItems, normalizedCalendarItems)
-            }
-            return
-        } catch (e: Exception) {
-            if (!shouldStoreOffline(e)) throw e
-        }
-        if (project != null) {
-            createGeneratedPlaceholder(project, "daily", taskName, payload, carryOverItems, normalizedCalendarItems)
-        }
-    }
-
-    private suspend fun generateSeasonal(templateKey: String, year: Int) {
-        val project = localStore.getProjects().firstOrNull { it.coreKey == "home" }
-        val payload = generationPayload(templateKey, "year", year.toString())
-        try {
-            if (isOfflineMode()) throw OfflineModeException()
-            apiClient.generateSeasonal(templateKey, year)
-            return
-        } catch (e: Exception) {
-            if (!shouldStoreOffline(e)) throw e
-        }
-        if (project != null) {
-            createGeneratedPlaceholder(project, templateKey, seasonalTaskName(templateKey, year), payload)
-        }
-    }
-
-    private suspend fun createGeneratedPlaceholder(
-        project: Project,
-        templateKey: String,
-        name: String,
-        payload: String,
-        carryOverItems: List<DailyGeneratedSubTask> = emptyList(),
-        calendarItems: List<DailyGeneratedSubTask> = emptyList(),
-    ) {
-        val existing = localStore.getTasks(project.id).firstOrNull { it.name == name && it.syncStatus == SYNC_PENDING_CREATE }
-        if (existing != null) return
-        val createdAt = now()
-        val task = Task(
-            id = newId(),
-            serverId = null,
-            projectId = project.id,
-            name = name,
-            description = "Pending generated list",
-            status = STATUS_TODO,
-            createdAt = createdAt,
-            finishedAt = null,
-            updatedAt = createdAt,
-            deletedAt = null,
-            syncStatus = SYNC_PENDING_CREATE,
-        )
-        localStore.saveTask(task)
-        val template = localStore.getTemplate(templateKey)
-        template?.items.orEmpty().sortedBy { it.position }.forEach { item ->
-            localStore.saveSubTask(
-                SubTask(
-                    id = newId(),
-                    serverId = null,
-                    taskId = task.id,
-                    name = item.name,
-                    description = item.description,
-                    status = STATUS_TODO,
-                    createdAt = createdAt,
-                    finishedAt = null,
-                    updatedAt = createdAt,
-                    deletedAt = null,
-                    syncStatus = SYNC_PENDING_CREATE,
-                ),
-            )
-        }
-        dedupeGeneratedSubTasks(carryOverItems + calendarItems).forEach { item ->
-            localStore.saveSubTask(
-                SubTask(
-                    id = newId(),
-                    serverId = null,
-                    taskId = task.id,
-                    name = item.name,
-                    description = item.description,
-                    status = STATUS_TODO,
-                    createdAt = createdAt,
-                    finishedAt = null,
-                    updatedAt = createdAt,
-                    deletedAt = null,
-                    syncStatus = SYNC_PENDING_CREATE,
-                ),
-            )
-        }
-        queue(ENTITY_GENERATION, MUTATION_GENERATE, task.id, payload)
-    }
-
-    private suspend fun syncGenerate(mutation: PendingMutation): Boolean {
-        val json = org.json.JSONObject(mutation.payload)
-        val templateKey = json.optString("template_key")
-        val carryOverItems = generatedSubTasksFromPayload(json, "carry_over_items")
-        val calendarItems = generatedSubTasksFromPayload(json, "calendar_items")
-        val generated = try {
-            if (templateKey == "daily") {
-                apiClient.generateDaily(json.optString("date"))
+    suspend fun importData(json: String, overwrite: Boolean): ImportResult {
+        ensureInitialized()
+        val incoming = parseImport(json)
+        var imported = 0
+        var skipped = 0
+        var conflicts = 0
+        val projectMap = mutableMapOf<String, String>()
+        incoming.projects.forEach { source ->
+            val existing = localStore.getProjects().firstOrNull { it.id == source.id || (source.coreKey != null && it.coreKey == source.coreKey) }
+            if (existing != null) {
+                conflicts++
+                projectMap[source.id] = existing.id
+                if (overwrite) {
+                    localStore.saveProject(source.copy(id = existing.id, isCore = existing.isCore || source.isCore, coreKey = existing.coreKey ?: source.coreKey))
+                    imported++
+                } else skipped++
             } else {
-                apiClient.generateSeasonal(templateKey, json.optInt("year", LocalDate.now().year))
+                localStore.saveProject(source)
+                projectMap[source.id] = source.id
+                imported++
             }
-        } catch (e: AdoApiException) {
-            if (e.statusCode == 409) {
-                localStore.getTask(mutation.localId)?.let { localStore.deleteTask(it) }
-                return true
-            }
-            throw e
         }
-        val placeholder = localStore.getTask(mutation.localId)
-        if (placeholder != null) {
-            dedupeGeneratedSubTasks(carryOverItems + calendarItems).forEach { item ->
-                apiClient.createSubTask(generated.taskId, item.name, item.description)
+        incoming.tasks.forEach { source ->
+            val targetProjectId = projectMap[source.projectId] ?: source.projectId
+            if (localStore.getProject(targetProjectId) == null) { skipped++; return@forEach }
+            val existing = localStore.getTask(source.id)
+            if (existing != null) {
+                conflicts++
+                if (!overwrite) { skipped++; return@forEach }
             }
-            val synced = placeholder.copy(
-                serverId = generated.taskId,
-                projectId = placeholder.projectId,
-                name = generated.name,
-                description = "",
-                syncStatus = SYNC_SYNCED,
-                updatedAt = now(),
-            )
-            localStore.saveTask(synced)
-            val remoteSubTasks = apiClient.getSubTasks(generated.taskId).map { reconcileSubTask(it, placeholder.id) }
-            localStore.saveSubTasks(placeholder.id, remoteSubTasks)
+            localStore.saveTask(source.copy(projectId = targetProjectId))
+            imported++
         }
-        return true
+        incoming.subtasks.forEach { source ->
+            if (localStore.getTask(source.taskId) == null) { skipped++; return@forEach }
+            val existing = localStore.getSubTask(source.id)
+            if (existing != null) {
+                conflicts++
+                if (!overwrite) { skipped++; return@forEach }
+            }
+            localStore.saveSubTask(source)
+            imported++
+        }
+        incoming.templates.forEach { source ->
+            val existing = localStore.getTemplate(source.templateKey)
+            if (existing != null) {
+                conflicts++
+                if (!overwrite) { skipped++; return@forEach }
+            }
+            localStore.saveTemplate(source)
+            imported++
+        }
+        dataRevision.value += 1
+        return ImportResult(imported = imported, skipped = skipped, conflicts = conflicts)
     }
 
-    private suspend fun queue(entityType: String, operation: String, localId: String, payload: String = "") {
-        val existing = localStore.getPendingMutations().firstOrNull {
-            it.entityType == entityType &&
-                it.operation == operation &&
-                (it.localId == localId || (payload.isNotBlank() && it.payload == payload))
+    fun friendlyError(error: Throwable): String = error.message ?: "Unable to complete operation."
+
+    private suspend fun ensureInitialized() {
+        if (initialized) return
+        // Re-serialize migrated records once so legacy backend metadata does not remain in JSON blobs.
+        localStore.getProjects().forEach { project ->
+            localStore.saveProject(project)
+            localStore.getTasks(project.id).forEach { task ->
+                localStore.saveTask(task)
+                localStore.getSubTasks(task.id).forEach { localStore.saveSubTask(it) }
+            }
         }
-        localStore.savePendingMutation(
-            existing ?: PendingMutation(
-                id = newId(),
-                entityType = entityType,
-                operation = operation,
-                localId = localId,
-                createdAt = now(),
-                payload = payload,
-            ),
+        ensureCoreProject("Daily", "daily")
+        ensureCoreProject("Home", "home")
+        ensureTemplates()
+        initialized = true
+    }
+
+    private suspend fun ensureCoreProject(name: String, coreKey: String): Project {
+        val existing = localStore.getProjects().firstOrNull { it.coreKey == coreKey }
+        if (existing != null) return existing
+        val created = Project(
+            id = newId(), name = name, description = "", tags = emptyList(),
+            isCore = true, coreKey = coreKey, createdAt = now(), updatedAt = now(), deletedAt = null,
         )
+        localStore.saveProject(created)
+        return created
     }
 
-    private fun pendingUpdateStatus(current: String): String =
-        if (current == SYNC_PENDING_CREATE) SYNC_PENDING_CREATE else SYNC_PENDING_UPDATE
-
-    private fun shouldStoreOffline(error: Exception): Boolean =
-        error !is AdoApiException || error.statusCode == null || error.statusCode >= 500
-
-    private fun mutationComparator(): Comparator<PendingMutation> {
-        fun operationRank(operation: String) = when (operation) {
-            MUTATION_CREATE -> 0
-            MUTATION_UPDATE -> 1
-            MUTATION_DELETE -> 2
-            else -> 3
-        }
-        fun entityRank(entityType: String) = when (entityType) {
-            ENTITY_PROJECT -> 0
-            ENTITY_TASK -> 1
-            ENTITY_SUBTASK -> 2
-            ENTITY_GENERATION -> 3
-            else -> 3
-        }
-        return compareBy<PendingMutation> { operationRank(it.operation) }
-            .thenBy { entityRank(it.entityType) }
-            .thenBy { it.createdAt }
+    private suspend fun ensureTemplates() {
+        val existing = localStore.getTemplates().map { it.templateKey }.toSet()
+        val templates = listOf(
+            localTemplate("daily", "Daily", "daily", listOf("Review calendar", "Set priorities")),
+            localTemplate("summer_chores", "Summer chores", "home", listOf("Seasonal home check")),
+            localTemplate("fall_chores", "Fall chores", "home", listOf("Seasonal home check")),
+            localTemplate("winter_chores", "Winter chores", "home", listOf("Seasonal home check")),
+            localTemplate("spring_chores", "Spring chores", "home", listOf("Seasonal home check")),
+            localTemplate("leaving_house", "Leaving house", "home", listOf("Lights off", "Small appliances unplugged", "Refrigerator / freezer doors shut", "Oven / stove off", "Doors locked", "Garage door closed", "Alarm set")),
+        )
+        templates.filterNot { it.templateKey in existing }.forEach { localStore.saveTemplate(it) }
     }
 
+    private fun localTemplate(key: String, name: String, coreKey: String, names: List<String>): Template = Template(
+        templateKey = key,
+        name = name,
+        projectCoreKey = coreKey,
+        items = names.mapIndexed { position, item -> TemplateItem(newId(), item, "", position) },
+    )
+
+    private suspend fun projectsWithCounts(): List<Project> = localStore.getProjects().map { withTaskCounts(it) }
+        .sortedBy { it.name.lowercase() }
+
+    private suspend fun withTaskCounts(project: Project): Project {
+        val tasks = localStore.getTasks(project.id)
+        return project.copy(taskCounts = TaskCounts(
+            total = tasks.size,
+            open = tasks.count { it.status != STATUS_DONE && it.status != "archived" },
+            todo = tasks.count { it.status == STATUS_TODO },
+            inProgress = tasks.count { it.status == "in_progress" },
+            done = tasks.count { it.status == STATUS_DONE },
+            archived = tasks.count { it.status == "archived" },
+        ))
+    }
+
+    private suspend fun coreProject(key: String): Project = localStore.getProjects().first { it.coreKey == key }
+    private suspend fun requireProject(id: String) = localStore.getProject(id) ?: throw IllegalArgumentException("Project not found.")
+    private suspend fun requireTask(id: String) = localStore.getTask(id) ?: throw IllegalArgumentException("Task not found.")
+
+    private suspend fun createGeneratedTask(projectId: String, name: String, items: List<DailyGeneratedSubTask>) {
+        val task = createTask(projectId, name, "")
+        items.distinctBy { "${it.name.lowercase()}|${it.description.lowercase()}" }.forEach { createSubTask(task.id, it.name, it.description) }
+    }
+
+    private suspend fun dailyCarryOver(projectId: String, targetDate: LocalDate, defaults: Set<String>): List<DailyGeneratedSubTask> {
+        val prior = localStore.getTasks(projectId)
+            .mapNotNull { task -> dailyTaskDate(task.name)?.takeIf { it < targetDate }?.let { it to task } }
+            .maxByOrNull { it.first }?.second ?: return emptyList()
+        return localStore.getSubTasks(prior.id)
+            .filter { !it.isDone && it.name !in defaults }
+            .map { DailyGeneratedSubTask(it.name, it.description) }
+    }
+
+    private fun resolveDailyTargetDate(value: String): LocalDate = when (value.lowercase()) {
+        "today" -> LocalDate.now()
+        "tomorrow" -> LocalDate.now().plusDays(1)
+        "yesterday" -> LocalDate.now().minusDays(1)
+        else -> try { LocalDate.parse(value) } catch (_: DateTimeParseException) { throw IllegalArgumentException("Invalid daily date.") }
+    }
+
+    private fun dailyTaskDate(name: String): LocalDate? = try { LocalDate.parse(name.take(10)) } catch (_: Exception) { null }
+    private fun dailyTaskName(date: LocalDate): String = "${date} ${date.format(DateTimeFormatter.ofPattern("EEEE"))}"
+    private fun requiredName(value: String): String = value.trim().takeIf(String::isNotBlank) ?: throw IllegalArgumentException("Name is required.")
+    private fun newId(): String = UUID.randomUUID().toString()
     private fun now(): String = Instant.now().toString()
 
-    private fun newId(): String = UUID.randomUUID().toString()
-
-    private suspend fun dailyCarryOverItems(project: Project, targetDate: LocalDate): List<DailyGeneratedSubTask> {
-        val defaultNames = dailyDefaultNames()
-        val tasks = freshOrCachedDailyTasks(project)
-        val previousTask = tasks
-            .mapNotNull { task -> dailyTaskDate(task.name)?.let { it to task } }
-            .filter { (date, _) -> date.isBefore(targetDate) }
-            .maxByOrNull { (date, _) -> date }
-            ?.second
-            ?: return emptyList()
-
-        val subtasks = freshOrCachedSubTasks(previousTask)
-        val seen = mutableSetOf<String>()
-        return subtasks.mapNotNull { subTask ->
-            val normalized = normalizeCarryOverName(subTask.name)
-            if (normalized.isBlank() ||
-                normalized in defaultNames ||
-                normalized in seen ||
-                subTask.status == STATUS_DONE ||
-                subTask.status == "archived"
-            ) {
-                null
-            } else {
-                seen += normalized
-                DailyGeneratedSubTask(subTask.name, subTask.description)
-            }
+    private fun parseImport(raw: String): ImportedDataset {
+        val root = try { JSONObject(raw) } catch (_: Exception) { throw IllegalArgumentException("Invalid backup file.") }
+        if (root.optString("format") != "ado-local-export") throw IllegalArgumentException("Not an ado backup file.")
+        fun objects(name: String): List<JSONObject> {
+            val array = root.optJSONArray(name) ?: JSONArray()
+            return List(array.length()) { array.getJSONObject(it) }
         }
-    }
-
-    private suspend fun dailyDefaultNames(): Set<String> {
-        val cached = localStore.getTemplate("daily")
-        if (isOfflineMode()) {
-            return cached?.items?.map { normalizeCarryOverName(it.name) }?.toSet()
-                ?: setOf("review calendar", "set priorities").map(::normalizeCarryOverName).toSet()
-        }
-        val template = cached ?: try {
-            apiClient.getTemplate("daily").also { localStore.saveTemplate(it) }
-        } catch (_: Exception) {
-            null
-        }
-        return template?.items?.map { normalizeCarryOverName(it.name) }?.toSet()
-            ?: setOf("review calendar", "set priorities").map(::normalizeCarryOverName).toSet()
-    }
-
-    private suspend fun freshOrCachedDailyTasks(project: Project): List<Task> {
-        if (isOfflineMode()) {
-            return localStore.getTasks(project.id)
-        }
-        return try {
-            val remoteProjectId = project.serverId ?: project.id
-            val fresh = apiClient.getTasks(remoteProjectId).map { reconcileTask(it, project.id, preservePending = true) }
-            localStore.saveTasks(project.id, fresh)
-            localStore.getTasks(project.id)
-        } catch (_: Exception) {
-            localStore.getTasks(project.id)
-        }
-    }
-
-    private suspend fun freshOrCachedSubTasks(task: Task): List<SubTask> {
-        if (isOfflineMode()) {
-            return localStore.getSubTasks(task.id)
-        }
-        return try {
-            val remoteTaskId = task.serverId ?: task.id
-            val fresh = apiClient.getSubTasks(remoteTaskId).map { reconcileSubTask(it, task.id, preservePending = true) }
-            localStore.saveSubTasks(task.id, fresh)
-            localStore.getSubTasks(task.id)
-        } catch (_: Exception) {
-            localStore.getSubTasks(task.id)
-        }
-    }
-
-    private suspend fun addExtraItemsToGeneratedDaily(
-        project: Project,
-        generated: GeneratedTask,
-        carryOverItems: List<DailyGeneratedSubTask>,
-        calendarItems: List<DailyGeneratedSubTask>,
-    ) {
-        dedupeGeneratedSubTasks(carryOverItems + calendarItems).forEach { item ->
-            apiClient.createSubTask(generated.taskId, item.name, item.description)
-        }
-        val task = reconcileTask(apiClient.getTask(generated.taskId), project.id)
-        localStore.saveTask(task)
-        val subtasks = apiClient.getSubTasks(generated.taskId).map { reconcileSubTask(it, task.id) }
-        localStore.saveSubTasks(task.id, subtasks)
-    }
-
-    private fun generatedSubTasksFromPayload(json: org.json.JSONObject, key: String): List<DailyGeneratedSubTask> {
-        val array = json.optJSONArray(key) ?: return emptyList()
-        return List(array.length()) { index ->
-            val item = array.optJSONObject(index) ?: org.json.JSONObject()
-            DailyGeneratedSubTask(
-                name = item.optString("name"),
-                description = item.optString("description"),
-            )
-        }.filter { it.name.isNotBlank() }
-    }
-
-    private fun CalendarDailyItem.toGeneratedSubTask(): DailyGeneratedSubTask =
-        DailyGeneratedSubTask(
-            name = name,
-            description = description.ifBlank { CALENDAR_ITEM_TAG },
+        return ImportedDataset(
+            projects = objects("projects").map(Project::fromJson),
+            tasks = objects("tasks").map(Task::fromJson),
+            subtasks = objects("subtasks").map(SubTask::fromJson),
+            templates = objects("templates").map(Template::fromJson),
         )
-
-    private fun dedupeGeneratedSubTasks(items: List<DailyGeneratedSubTask>): List<DailyGeneratedSubTask> {
-        val seen = mutableSetOf<String>()
-        return items.filter { item ->
-            val key = "${normalizeCarryOverName(item.name)}|${normalizeCarryOverName(item.description)}"
-            key.isNotBlank() && seen.add(key)
-        }
     }
 
-    private fun dailyTaskDate(name: String): LocalDate? =
-        try {
-            LocalDate.parse(name.trim().take(10), DateTimeFormatter.ISO_LOCAL_DATE)
-        } catch (_: DateTimeParseException) {
-            null
-        }
+    private fun exportProject(project: Project): JSONObject = JSONObject()
+        .put("id", project.id).put("name", project.name).put("description", project.description)
+        .put("tags", JSONArray(project.tags)).put("is_core", project.isCore).put("core_key", project.coreKey)
+        .put("created_at", project.createdAt).put("updated_at", project.updatedAt).put("deleted_at", project.deletedAt)
 
-    private fun resolveDailyTargetDate(raw: String): LocalDate {
-        return when (raw.trim().lowercase()) {
-            "", "today" -> LocalDate.now()
-            "tomorrow" -> LocalDate.now().plusDays(1)
-            "yesterday" -> LocalDate.now().minusDays(1)
-            else -> LocalDate.parse(raw.trim().take(10), DateTimeFormatter.ISO_LOCAL_DATE)
-        }
-    }
+    private fun exportTask(task: Task): JSONObject = JSONObject()
+        .put("id", task.id).put("project_id", task.projectId).put("name", task.name).put("description", task.description)
+        .put("status", task.status).put("created_at", task.createdAt).put("finished_at", task.finishedAt)
+        .put("updated_at", task.updatedAt).put("deleted_at", task.deletedAt)
 
-    private fun dailyTaskName(date: LocalDate): String =
-        "${date.format(DateTimeFormatter.ISO_LOCAL_DATE)} ${date.dayOfWeek.name.lowercase().replaceFirstChar { it.uppercase() }}"
+    private fun exportSubTask(subTask: SubTask): JSONObject = JSONObject()
+        .put("id", subTask.id).put("task_id", subTask.taskId).put("name", subTask.name).put("description", subTask.description)
+        .put("status", subTask.status).put("created_at", subTask.createdAt).put("finished_at", subTask.finishedAt)
+        .put("updated_at", subTask.updatedAt).put("deleted_at", subTask.deletedAt)
 
-    private fun normalizeCarryOverName(name: String): String =
-        name.trim().lowercase().replace(Regex("""\s+"""), " ")
-
-    private fun generationPayload(
-        templateKey: String,
-        valueName: String,
-        value: String,
-        carryOverItems: List<DailyGeneratedSubTask> = emptyList(),
-        calendarItems: List<DailyGeneratedSubTask> = emptyList(),
-    ): String =
-        org.json.JSONObject()
-            .put("template_key", templateKey)
-            .put(valueName, value)
-            .put(
-                "carry_over_items",
-                org.json.JSONArray().also { array ->
-                    carryOverItems.forEach { item ->
-                        array.put(
-                            org.json.JSONObject()
-                                .put("name", item.name)
-                                .put("description", item.description),
-                        )
-                    }
-                },
-            )
-            .put(
-                "calendar_items",
-                org.json.JSONArray().also { array ->
-                    calendarItems.forEach { item ->
-                        array.put(
-                            org.json.JSONObject()
-                                .put("name", item.name)
-                                .put("description", item.description),
-                        )
-                    }
-                },
-            )
-            .toString()
-
-    private fun seasonalTaskName(templateKey: String, year: Int): String {
-        if (templateKey == "leaving_house") {
-            return "Leaving house"
-        }
-        val label = when (templateKey) {
-            "summer_chores" -> "Summer chores"
-            "fall_chores" -> "Fall chores"
-            "winter_chores" -> "Winter chores"
-            "spring_chores" -> "Spring chores"
-            else -> templateKey
-        }
-        return "$label $year"
-    }
+    private fun List<JSONObject>.asArray(): JSONArray = JSONArray().also { array -> forEach { array.put(it) } }
 }

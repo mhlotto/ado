@@ -5,11 +5,6 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
-val configuredServerUrl = providers.gradleProperty("ADO_SERVER_URL")
-    .orElse(providers.environmentVariable("ADO_SERVER_URL"))
-    .getOrElse("http://10.0.2.2:8989")
-val escapedServerUrl = configuredServerUrl.replace("\\", "\\\\").replace("\"", "\\\"")
-
 android {
     namespace = "com.ado.app"
     compileSdk = 35
@@ -20,11 +15,9 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
-        buildConfigField("String", "DEFAULT_SERVER_URL", "\"$escapedServerUrl\"")
     }
 
     buildFeatures {
-        buildConfig = true
         compose = true
     }
 
@@ -52,7 +45,6 @@ dependencies {
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
