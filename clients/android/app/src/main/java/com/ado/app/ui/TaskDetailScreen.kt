@@ -25,6 +25,7 @@ import com.ado.app.data.Project
 import com.ado.app.data.SYNC_SYNCED
 import com.ado.app.data.SubTask
 import com.ado.app.data.Task
+import java.time.Instant
 import kotlinx.coroutines.launch
 
 @Composable
@@ -307,7 +308,7 @@ fun TaskDetailScreen(
                 subtasks.isEmpty() -> EmptyState("No subtasks.")
                 else -> LazyColumn {
                     val unfinishedSubTasks = subtasks.filterNot { it.isDone }
-                    val finishedSubTasks = subtasks.filter { it.isDone }
+                    val finishedSubTasks = subtasks.filter { it.isDone }.sortedBy(::subTaskFinishedAt)
                     items(unfinishedSubTasks, key = { it.id }) { subTask ->
                         if (simpleView) {
                             SubTaskSimpleRow(
@@ -343,6 +344,7 @@ fun TaskDetailScreen(
                                 } else {
                                     SubTaskRow(
                                         subTask = subTask,
+                                        showFinishedAt = true,
                                         onLongPress = { toggleSubTask(subTask) },
                                         onEdit = { openEditSubTask(subTask) },
                                         onDelete = { subTaskToDelete = subTask },
@@ -420,6 +422,15 @@ fun TaskDetailScreen(
             onDismiss = { showOfflinePrompt = false },
             onConfirm = { setOfflineMode(true) },
         )
+    }
+}
+
+private fun subTaskFinishedAt(subTask: SubTask): Instant {
+    val finishedAt = subTask.finishedAt ?: return Instant.MAX
+    return try {
+        Instant.parse(finishedAt)
+    } catch (_: Exception) {
+        Instant.MAX
     }
 }
 

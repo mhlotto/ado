@@ -55,6 +55,10 @@ import com.ado.app.R
 import com.ado.app.data.Project
 import com.ado.app.data.SubTask
 import com.ado.app.data.Task
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 data class OpenDoneCounts(val open: Int, val done: Int) {
     val total: Int
@@ -308,13 +312,22 @@ fun OfflineBanner(message: String) {
 }
 
 @Composable
-fun StatusText(status: String) {
+fun StatusText(status: String, finishedAt: String? = null) {
+    val finishedLabel = finishedAt?.let(::formatFinishedAt)
     Text(
-        text = status,
+        text = if (finishedLabel == null) status else "$status - $finishedLabel",
         color = MaterialTheme.colorScheme.primary,
         style = MaterialTheme.typography.labelMedium,
     )
 }
+
+private fun formatFinishedAt(finishedAt: String): String? =
+    try {
+        DateTimeFormatter.ofPattern("MMM d, h:mm a", Locale.getDefault())
+            .format(Instant.parse(finishedAt).atZone(ZoneId.systemDefault()))
+    } catch (_: Exception) {
+        null
+    }
 
 @Composable
 fun SyncAction(pendingCount: Int, onClick: () -> Unit) {
@@ -358,14 +371,14 @@ fun OpenDoneStatTiles(
         CountStatTile(
             label = "open",
             count = counts.open,
-            backgroundColor = Color(0xFFE2F3E6),
-            contentColor = Color(0xFF246B36),
+            backgroundColor = Color(0xFF294C46),
+            contentColor = Color(0xFFB8E2C3),
         )
         CountStatTile(
             label = "done",
             count = counts.done,
-            backgroundColor = Color(0xFFF8E1E1),
-            contentColor = Color(0xFF8A2D2D),
+            backgroundColor = Color(0xFF563E45),
+            contentColor = Color(0xFFF3BCC0),
         )
     }
 }
@@ -550,6 +563,7 @@ fun TaskSimpleRow(task: Task, subTaskCounts: OpenDoneCounts? = null, onClick: ()
 fun TaskRow(
     task: Task,
     subTaskCounts: OpenDoneCounts? = null,
+    showFinishedAt: Boolean = false,
     onClick: () -> Unit,
     onLongPress: () -> Unit,
     onEdit: (() -> Unit)? = null,
@@ -577,12 +591,12 @@ fun TaskRow(
                         Text(task.description, style = MaterialTheme.typography.bodyMedium)
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        StatusText(task.status)
+                        StatusText(
+                            status = task.status,
+                            finishedAt = task.finishedAt.takeIf { showFinishedAt },
+                        )
                         task.displaySyncStatus?.let {
                             Text(it, color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelMedium)
-                        }
-                        if (task.finishedAt != null) {
-                            Text("Finished ${task.finishedAt}", style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }
@@ -612,7 +626,13 @@ fun SubTaskSimpleRow(subTask: SubTask, onClick: () -> Unit, onLongPress: () -> U
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun SubTaskRow(subTask: SubTask, onLongPress: () -> Unit, onEdit: (() -> Unit)? = null, onDelete: (() -> Unit)? = null) {
+fun SubTaskRow(
+    subTask: SubTask,
+    showFinishedAt: Boolean = false,
+    onLongPress: () -> Unit,
+    onEdit: (() -> Unit)? = null,
+    onDelete: (() -> Unit)? = null,
+) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -628,7 +648,10 @@ fun SubTaskRow(subTask: SubTask, onLongPress: () -> Unit, onEdit: (() -> Unit)? 
             if (subTask.description.isNotBlank()) {
                 Text(subTask.description, style = MaterialTheme.typography.bodyMedium)
             }
-            StatusText(subTask.status)
+            StatusText(
+                status = subTask.status,
+                finishedAt = subTask.finishedAt.takeIf { showFinishedAt },
+            )
             subTask.displaySyncStatus?.let {
                 Text(it, color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelMedium)
             }

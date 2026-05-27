@@ -361,7 +361,7 @@ fun ProjectDetailScreen(
                 else -> LazyColumn {
                     val displayTasks = sortedTasksForProject(project, tasks)
                     val unfinishedTasks = displayTasks.filterNot { it.isDone }
-                    val finishedTasks = displayTasks.filter { it.isDone }
+                    val finishedTasks = displayTasks.filter { it.isDone }.sortedBy(::taskFinishedAt)
                     items(unfinishedTasks, key = { it.id }) { task ->
                         if (simpleView) {
                             TaskSimpleRow(
@@ -402,6 +402,7 @@ fun ProjectDetailScreen(
                                     TaskRow(
                                         task = task,
                                         subTaskCounts = subTaskCounts[task.id],
+                                        showFinishedAt = true,
                                         onClick = { onOpenTask(task.id) },
                                         onLongPress = { toggle(task) },
                                         onEdit = { openEditTask(task) },
@@ -513,6 +514,15 @@ private fun taskCreatedAt(task: Task): Instant =
     } catch (_: Exception) {
         Instant.EPOCH
     }
+
+private fun taskFinishedAt(task: Task): Instant {
+    val finishedAt = task.finishedAt ?: return Instant.MAX
+    return try {
+        Instant.parse(finishedAt)
+    } catch (_: Exception) {
+        Instant.MAX
+    }
+}
 
 private fun projectQuickAddActions(
     project: Project?,
