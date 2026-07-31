@@ -19,6 +19,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.ado.app.data.AdoRepository
@@ -41,6 +42,7 @@ fun TemplateDetailScreen(
     var showAddDialog by remember { mutableStateOf(false) }
     var itemToEdit by remember { mutableStateOf<TemplateItem?>(null) }
     var itemToDelete by remember { mutableStateOf<TemplateItem?>(null) }
+    var showListTypeDialog by remember { mutableStateOf(false) }
     val dataRevision by repository.dataRevisionFlow.collectAsState(initial = 0)
 
     fun setTemplate(next: Template?) {
@@ -101,10 +103,23 @@ fun TemplateDetailScreen(
         saveItems(mutable)
     }
 
+    fun updateListType(listType: String) {
+        val current = template ?: return
+        scope.launch {
+            error = null
+            try {
+                setTemplate(repository.updateTemplateListType(current, listType))
+                showListTypeDialog = false
+            } catch (e: Exception) {
+                error = repository.friendlyError(e)
+            }
+        }
+    }
+
     LaunchedEffect(templateKey, dataRevision) { refresh() }
 
     AdoScaffold(
-        title = template?.name ?: "Template",
+        title = "Template",
         onBack = onBack,
         onSettings = onOpenSettings,
         bottomActions = listOf(
@@ -123,7 +138,21 @@ fun TemplateDetailScreen(
 
             template?.let {
                 Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Text(
+                            text = it.name,
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.headlineSmall,
+                        )
+                        ListTypeSettingsButton(onClick = { showListTypeDialog = true })
+                    }
                     Text(it.templateKey, style = MaterialTheme.typography.bodySmall, color = MutedTextColor)
+                    it.listType?.let { type ->
+                        Text("list: ${listTypeLabel(type)}", style = MaterialTheme.typography.bodySmall, color = MutedTextColor)
+                    }
                     if (it.description.isNotBlank()) {
                         Text(it.description, style = MaterialTheme.typography.bodyMedium)
                     }
@@ -147,6 +176,17 @@ fun TemplateDetailScreen(
                     }
                 }
             }
+        }
+    }
+
+    template?.let { currentTemplate ->
+        if (showListTypeDialog) {
+            ListTypeDialog(
+                title = "Generated list type",
+                currentType = currentTemplate.listType ?: com.ado.app.data.LIST_TYPE_NORMAL,
+                onDismiss = { showListTypeDialog = false },
+                onSave = ::updateListType,
+            )
         }
     }
 

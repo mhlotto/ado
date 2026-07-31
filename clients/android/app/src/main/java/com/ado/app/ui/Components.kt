@@ -52,6 +52,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.ado.app.R
+import com.ado.app.data.LIST_TYPES
+import com.ado.app.data.LIST_TYPE_CHECKLIST
+import com.ado.app.data.LIST_TYPE_CUSTOM
+import com.ado.app.data.LIST_TYPE_DAILY
+import com.ado.app.data.LIST_TYPE_MARKET
+import com.ado.app.data.LIST_TYPE_NORMAL
 import com.ado.app.data.Project
 import com.ado.app.data.SubTask
 import com.ado.app.data.Task
@@ -585,6 +591,10 @@ fun SubTaskRow(
     subTask: SubTask,
     showFinishedAt: Boolean = false,
     onLongPress: () -> Unit,
+    onMoveUp: (() -> Unit)? = null,
+    onMoveDown: (() -> Unit)? = null,
+    canMoveUp: Boolean = false,
+    canMoveDown: Boolean = false,
     onEdit: (() -> Unit)? = null,
     onDelete: (() -> Unit)? = null,
 ) {
@@ -607,7 +617,22 @@ fun SubTaskRow(
                 status = subTask.status,
                 finishedAt = subTask.finishedAt.takeIf { showFinishedAt },
             )
-            CompactRowActions(onEdit = onEdit, onDelete = onDelete)
+            if (onMoveUp != null || onMoveDown != null || onEdit != null || onDelete != null) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (onMoveUp != null) {
+                        CompactTextAction("Up", onMoveUp, enabled = canMoveUp)
+                    }
+                    if (onMoveDown != null) {
+                        CompactTextAction("Down", onMoveDown, enabled = canMoveDown)
+                    }
+                    if (onEdit != null) {
+                        CompactTextAction("Edit", onEdit)
+                    }
+                    if (onDelete != null) {
+                        CompactTextAction("Delete", onDelete)
+                    }
+                }
+            }
         }
     }
 }
@@ -674,13 +699,13 @@ private fun CompactRowActions(onEdit: (() -> Unit)?, onDelete: (() -> Unit)?) {
 }
 
 @Composable
-private fun CompactTextAction(label: String, onClick: () -> Unit) {
+private fun CompactTextAction(label: String, onClick: () -> Unit, enabled: Boolean = true) {
     Text(
         text = label,
         modifier = Modifier
-            .clickable(onClick = onClick)
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(vertical = 2.dp),
-        color = MaterialTheme.colorScheme.primary,
+        color = if (enabled) MaterialTheme.colorScheme.primary else MutedTextColor,
         style = MaterialTheme.typography.labelLarge,
     )
 }
@@ -694,6 +719,82 @@ fun ActionButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifi
 
 val MutedTextColor: Color
     @Composable get() = MaterialTheme.colorScheme.onSurfaceVariant
+
+fun listTypeLabel(type: String): String = when (type) {
+    LIST_TYPE_DAILY -> "Daily"
+    LIST_TYPE_MARKET -> "Market"
+    LIST_TYPE_CHECKLIST -> "Checklist"
+    LIST_TYPE_CUSTOM -> "Custom ordered"
+    else -> "Normal"
+}
+
+@Composable
+fun ListTypeSettingsButton(onClick: () -> Unit) {
+    TextButton(onClick = onClick) {
+        Text(
+            text = "\u2699",
+            style = MaterialTheme.typography.titleLarge,
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ListTypeDialog(
+    title: String,
+    currentType: String,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+) {
+    var selectedType by remember(title, currentType) {
+        mutableStateOf(currentType.takeIf { it in LIST_TYPES } ?: LIST_TYPE_NORMAL)
+    }
+    var expanded by remember(title) { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ExposedDropdownMenuBox(
+                    expanded = expanded,
+                    onExpandedChange = { expanded = !expanded },
+                ) {
+                    OutlinedTextField(
+                        value = listTypeLabel(selectedType),
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("List type") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                        modifier = Modifier
+                            .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                            .fillMaxWidth(),
+                    )
+                    ExposedDropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false },
+                    ) {
+                        LIST_TYPES.forEach { type ->
+                            DropdownMenuItem(
+                                text = { Text(listTypeLabel(type)) },
+                                onClick = {
+                                    selectedType = type
+                                    expanded = false
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(selectedType) }) { Text("Save") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
+}
 
 @Composable
 fun EntityFormDialog(

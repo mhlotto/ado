@@ -34,6 +34,8 @@ data class ImportResult(
     val conflicts: Int,
 )
 
+data class TemplateApplyResult(val added: Int)
+
 /** Android is self-contained. Room is the canonical storage for all app data. */
 class AdoRepository(
     private val localStore: LocalStore,
@@ -96,6 +98,18 @@ class AdoRepository(
             updatedAt = now(),
         )
         localStore.saveProject(updated)
+        dataRevision.value += 1
+        return withTaskCounts(updated)
+    }
+
+    suspend fun updateProjectListType(project: Project, listType: String): Project {
+        ensureInitialized()
+        val updated = project.copy(
+            listType = validListType(listType),
+            updatedAt = now(),
+        )
+        localStore.saveProject(updated)
+        dataRevision.value += 1
         return withTaskCounts(updated)
     }
 
@@ -108,7 +122,7 @@ class AdoRepository(
 
     suspend fun getTasks(projectId: String): LoadResult<List<Task>> {
         ensureInitialized()
-        return LoadResult(localStore.getTasks(projectId))
+        return LoadResult(orderedTasks(localStore.getTasks(projectId)))
     }
 
     suspend fun getTaskMoveProjectOptions(): List<Project> {
@@ -118,11 +132,16 @@ class AdoRepository(
 
     suspend fun getSubTaskMoveTaskOptions(): List<Task> {
         ensureInitialized()
-        return localStore.getProjects().flatMap { localStore.getTasks(it.id) }
+        return localStore.getProjects().flatMap { orderedTasks(localStore.getTasks(it.id)) }
             .sortedBy { it.name.lowercase() }
     }
 
-    suspend fun createTask(projectId: String, name: String, description: String): Task {
+    suspend fun createTask(
+        projectId: String,
+        name: String,
+        description: String,
+        listType: String = LIST_TYPE_NORMAL,
+    ): Task {
         ensureInitialized()
         requireProject(projectId)
         val task = Task(
@@ -135,6 +154,8 @@ class AdoRepository(
             finishedAt = null,
             updatedAt = now(),
             deletedAt = null,
+            listType = listType,
+            position = nextTaskPosition(projectId),
         )
         localStore.saveTask(task)
         return task
@@ -153,8 +174,21 @@ class AdoRepository(
             name = requiredName(name),
             description = description.trim(),
             updatedAt = now(),
+            position = if (projectId == task.projectId) task.position else nextTaskPosition(projectId),
         )
         localStore.saveTask(updated)
+        dataRevision.value += 1
+        return updated
+    }
+
+    suspend fun updateTaskListType(task: Task, listType: String): Task {
+        ensureInitialized()
+        val updated = task.copy(
+            listType = validListType(listType),
+            updatedAt = now(),
+        )
+        localStore.saveTask(updated)
+        dataRevision.value += 1
         return updated
     }
 
@@ -165,7 +199,7 @@ class AdoRepository(
 
     suspend fun getSubTasks(taskId: String): LoadResult<List<SubTask>> {
         ensureInitialized()
-        return LoadResult(localStore.getSubTasks(taskId))
+        return LoadResult(orderedSubTasks(localStore.getSubTasks(taskId)))
     }
 
     suspend fun createSubTask(taskId: String, name: String, description: String): SubTask {
@@ -181,6 +215,7 @@ class AdoRepository(
             finishedAt = null,
             updatedAt = now(),
             deletedAt = null,
+            position = nextSubTaskPosition(taskId),
         )
         localStore.saveSubTask(subTask)
         return subTask
@@ -194,6 +229,7 @@ class AdoRepository(
             name = requiredName(name),
             description = description.trim(),
             updatedAt = now(),
+            position = if (taskId == subTask.taskId) subTask.position else nextSubTaskPosition(taskId),
         )
         localStore.saveSubTask(updated)
         return updated
@@ -228,6 +264,22 @@ class AdoRepository(
         return updated
     }
 
+    suspend fun moveUnfinishedSubTask(taskId: String, subTaskId: String, delta: Int): List<SubTask> {
+        ensureInitialized()
+        val ordered = orderedSubTasks(localStore.getSubTasks(taskId))
+        val unfinished = ordered.filterNot { it.isDone }.toMutableList()
+        val from = unfinished.indexOfFirst { it.id == subTaskId }
+        val to = from + delta
+        if (from < 0 || to !in unfinished.indices) return ordered
+        val item = unfinished.removeAt(from)
+        unfinished.add(to, item)
+        val savedPositions = ordered.filterNot { it.isDone }.map { it.position }.sorted()
+        unfinished.forEachIndexed { index, subTask ->
+            localStore.saveSubTask(subTask.copy(position = savedPositions[index], updatedAt = now()))
+        }
+        return orderedSubTasks(localStore.getSubTasks(taskId))
+    }
+
     suspend fun generateDailyToday(carryOver: Boolean = false) {
         generateDaily("today", carryOver)
     }
@@ -249,7 +301,7 @@ class AdoRepository(
         val defaults = template.items.sortedBy { it.position }.map { DailyGeneratedSubTask(it.name, it.description) }
         val carried = if (carryOver) dailyCarryOver(dailyProject.id, targetDate, defaults.map { it.name }.toSet()) else emptyList()
         val fromCalendar = calendarItems.map { DailyGeneratedSubTask(it.name, it.description) }
-        createGeneratedTask(dailyProject.id, dailyTaskName(targetDate), defaults + carried + fromCalendar)
+        createGeneratedTask(dailyProject.id, dailyTaskName(targetDate), LIST_TYPE_DAILY, defaults + carried + fromCalendar)
     }
 
     suspend fun generateSeasonal(templateKey: String) {
@@ -270,6 +322,7 @@ class AdoRepository(
         createGeneratedTask(
             projectId = homeProject.id,
             name = name,
+            listType = template.listType ?: LIST_TYPE_CHECKLIST,
             items = template.items.sortedBy { it.position }.map { DailyGeneratedSubTask(it.name, it.description) },
         )
     }
@@ -295,6 +348,48 @@ class AdoRepository(
         return updated
     }
 
+    suspend fun updateTemplateListType(template: Template, listType: String): Template {
+        ensureInitialized()
+        val updated = template.copy(listType = validListType(listType))
+        localStore.saveTemplate(updated)
+        dataRevision.value += 1
+        return updated
+    }
+
+    suspend fun applyTemplateToTask(taskId: String, templateKey: String): TemplateApplyResult {
+        ensureInitialized()
+        requireTask(taskId)
+        val template = localStore.getTemplate(templateKey) ?: throw IllegalArgumentException("Template not found.")
+        val existingNames = orderedSubTasks(localStore.getSubTasks(taskId))
+            .filterNot { it.isDone }
+            .mapTo(mutableSetOf()) { it.name.trim().lowercase() }
+        var added = 0
+        template.items.sortedBy { it.position }.forEach { item ->
+            val normalizedName = item.name.trim().lowercase()
+            if (normalizedName.isNotEmpty() && normalizedName !in existingNames) {
+                createSubTask(taskId, item.name, item.description)
+                existingNames += normalizedName
+                added += 1
+            }
+        }
+        return TemplateApplyResult(added)
+    }
+
+    suspend fun createTaskFromTemplate(projectId: String, templateKey: String): Task {
+        ensureInitialized()
+        val template = localStore.getTemplate(templateKey) ?: throw IllegalArgumentException("Template not found.")
+        val task = createTask(
+            projectId = projectId,
+            name = template.name,
+            description = template.description,
+            listType = template.listType ?: LIST_TYPE_NORMAL,
+        )
+        template.items.sortedBy { it.position }.forEach { item ->
+            createSubTask(task.id, item.name, item.description)
+        }
+        return task
+    }
+
     suspend fun exportData(): String {
         ensureInitialized()
         val projects = localStore.getProjects()
@@ -302,7 +397,7 @@ class AdoRepository(
         val subtasks = tasks.flatMap { localStore.getSubTasks(it.id) }
         val root = JSONObject()
             .put("format", "ado-local-export")
-            .put("version", 1)
+            .put("version", 2)
             .put("exported_at", now())
             .put("projects", projects.map(::exportProject).asArray())
             .put("tasks", tasks.map(::exportTask).asArray())
@@ -377,6 +472,7 @@ class AdoRepository(
             localStore.saveTemplate(source)
             imported++
         }
+        normalizeStoredPositions()
         dataRevision.value += 1
         return ImportResult(imported = imported, skipped = skipped, conflicts = conflicts)
     }
@@ -385,48 +481,61 @@ class AdoRepository(
 
     private suspend fun ensureInitialized() {
         if (initialized) return
-        // Re-serialize migrated records once so legacy backend metadata does not remain in JSON blobs.
-        localStore.getProjects().forEach { project ->
-            localStore.saveProject(project)
-            localStore.getTasks(project.id).forEach { task ->
-                localStore.saveTask(task)
-                localStore.getSubTasks(task.id).forEach { localStore.saveSubTask(it) }
-            }
-        }
-        ensureCoreProject("Daily", "daily")
-        ensureCoreProject("Home", "home")
+        normalizeStoredPositions()
+        ensureCoreProject("Daily", "daily", LIST_TYPE_DAILY)
+        ensureCoreProject("Home", "home", LIST_TYPE_CHECKLIST)
         ensureTemplates()
         initialized = true
     }
 
-    private suspend fun ensureCoreProject(name: String, coreKey: String): Project {
+    private suspend fun normalizeStoredPositions() {
+        localStore.getProjects().forEach { project ->
+            localStore.saveProject(project)
+            val tasks = normalizedTasks(localStore.getTasks(project.id))
+            tasks.forEach { task ->
+                localStore.saveTask(task)
+                normalizedSubTasks(localStore.getSubTasks(task.id)).forEach { localStore.saveSubTask(it) }
+            }
+        }
+    }
+
+    private suspend fun ensureCoreProject(name: String, coreKey: String, listType: String): Project {
         val existing = localStore.getProjects().firstOrNull { it.coreKey == coreKey }
         if (existing != null) return existing
         val created = Project(
             id = newId(), name = name, description = "", tags = emptyList(),
             isCore = true, coreKey = coreKey, createdAt = now(), updatedAt = now(), deletedAt = null,
+            listType = listType,
         )
         localStore.saveProject(created)
         return created
     }
 
     private suspend fun ensureTemplates() {
-        val existing = localStore.getTemplates().map { it.templateKey }.toSet()
         val templates = listOf(
-            localTemplate("daily", "Daily", "daily", listOf("Review calendar", "Set priorities")),
-            localTemplate("summer_chores", "Summer chores", "home", listOf("Seasonal home check")),
-            localTemplate("fall_chores", "Fall chores", "home", listOf("Seasonal home check")),
-            localTemplate("winter_chores", "Winter chores", "home", listOf("Seasonal home check")),
-            localTemplate("spring_chores", "Spring chores", "home", listOf("Seasonal home check")),
-            localTemplate("leaving_house", "Leaving house", "home", listOf("Lights off", "Small appliances unplugged", "Refrigerator / freezer doors shut", "Oven / stove off", "Doors locked", "Garage door closed", "Alarm set")),
+            localTemplate("daily", "Daily", "daily", LIST_TYPE_DAILY, listOf("Review calendar", "Set priorities")),
+            localTemplate("summer_chores", "Summer chores", "home", LIST_TYPE_CHECKLIST, listOf("Seasonal home check")),
+            localTemplate("fall_chores", "Fall chores", "home", LIST_TYPE_CHECKLIST, listOf("Seasonal home check")),
+            localTemplate("winter_chores", "Winter chores", "home", LIST_TYPE_CHECKLIST, listOf("Seasonal home check")),
+            localTemplate("spring_chores", "Spring chores", "home", LIST_TYPE_CHECKLIST, listOf("Seasonal home check")),
+            localTemplate("leaving_house", "Leaving house", "home", LIST_TYPE_CHECKLIST, listOf("Lights off", "Small appliances unplugged", "Refrigerator / freezer doors shut", "Oven / stove off", "Doors locked", "Garage door closed", "Alarm set")),
+            localTemplate("market", "Market", null, LIST_TYPE_MARKET, listOf("Produce", "Bread", "Meat", "Dairy", "Frozen", "Household", "Other")),
         )
-        templates.filterNot { it.templateKey in existing }.forEach { localStore.saveTemplate(it) }
+        val existing = localStore.getTemplates().associateBy { it.templateKey }
+        templates.forEach { seed ->
+            val saved = existing[seed.templateKey]
+            when {
+                saved == null -> localStore.saveTemplate(seed)
+                saved.listType == null -> localStore.saveTemplate(saved.copy(listType = seed.listType))
+            }
+        }
     }
 
-    private fun localTemplate(key: String, name: String, coreKey: String, names: List<String>): Template = Template(
+    private fun localTemplate(key: String, name: String, coreKey: String?, listType: String, names: List<String>): Template = Template(
         templateKey = key,
         name = name,
         projectCoreKey = coreKey,
+        listType = listType,
         items = names.mapIndexed { position, item -> TemplateItem(newId(), item, "", position) },
     )
 
@@ -449,8 +558,8 @@ class AdoRepository(
     private suspend fun requireProject(id: String) = localStore.getProject(id) ?: throw IllegalArgumentException("Project not found.")
     private suspend fun requireTask(id: String) = localStore.getTask(id) ?: throw IllegalArgumentException("Task not found.")
 
-    private suspend fun createGeneratedTask(projectId: String, name: String, items: List<DailyGeneratedSubTask>) {
-        val task = createTask(projectId, name, "")
+    private suspend fun createGeneratedTask(projectId: String, name: String, listType: String, items: List<DailyGeneratedSubTask>) {
+        val task = createTask(projectId, name, "", listType)
         items.distinctBy { "${it.name.lowercase()}|${it.description.lowercase()}" }.forEach { createSubTask(task.id, it.name, it.description) }
     }
 
@@ -473,8 +582,34 @@ class AdoRepository(
     private fun dailyTaskDate(name: String): LocalDate? = try { LocalDate.parse(name.take(10)) } catch (_: Exception) { null }
     private fun dailyTaskName(date: LocalDate): String = "${date} ${date.format(DateTimeFormatter.ofPattern("EEEE"))}"
     private fun requiredName(value: String): String = value.trim().takeIf(String::isNotBlank) ?: throw IllegalArgumentException("Name is required.")
+    private fun validListType(value: String): String =
+        value.takeIf { it in LIST_TYPES } ?: throw IllegalArgumentException("Invalid list type.")
     private fun newId(): String = UUID.randomUUID().toString()
     private fun now(): String = Instant.now().toString()
+
+    private suspend fun nextTaskPosition(projectId: String): Int =
+        localStore.getTasks(projectId).maxOfOrNull { it.position }?.coerceAtLeast(-1)?.plus(1) ?: 0
+
+    private suspend fun nextSubTaskPosition(taskId: String): Int =
+        localStore.getSubTasks(taskId).maxOfOrNull { it.position }?.coerceAtLeast(-1)?.plus(1) ?: 0
+
+    private fun normalizedTasks(tasks: List<Task>): List<Task> {
+        if (tasks.none { it.position >= 0 }) return tasks.mapIndexed { index, task -> task.copy(position = index) }
+        var next = (tasks.maxOfOrNull { it.position } ?: -1) + 1
+        return tasks.map { task -> if (task.position < 0) task.copy(position = next++) else task }
+    }
+
+    private fun normalizedSubTasks(subTasks: List<SubTask>): List<SubTask> {
+        if (subTasks.none { it.position >= 0 }) return subTasks.mapIndexed { index, subTask -> subTask.copy(position = index) }
+        var next = (subTasks.maxOfOrNull { it.position } ?: -1) + 1
+        return subTasks.map { subTask -> if (subTask.position < 0) subTask.copy(position = next++) else subTask }
+    }
+
+    private fun orderedTasks(tasks: List<Task>): List<Task> =
+        tasks.sortedWith(compareBy<Task> { it.position.takeIf { position -> position >= 0 } ?: Int.MAX_VALUE }.thenBy { it.createdAt })
+
+    private fun orderedSubTasks(subTasks: List<SubTask>): List<SubTask> =
+        subTasks.sortedWith(compareBy<SubTask> { it.position.takeIf { position -> position >= 0 } ?: Int.MAX_VALUE }.thenBy { it.createdAt })
 
     private fun parseImport(raw: String): ImportedDataset {
         val root = try { JSONObject(raw) } catch (_: Exception) { throw IllegalArgumentException("Invalid backup file.") }
@@ -495,16 +630,17 @@ class AdoRepository(
         .put("id", project.id).put("name", project.name).put("description", project.description)
         .put("tags", JSONArray(project.tags)).put("is_core", project.isCore).put("core_key", project.coreKey)
         .put("created_at", project.createdAt).put("updated_at", project.updatedAt).put("deleted_at", project.deletedAt)
+        .put("list_type", project.listType)
 
     private fun exportTask(task: Task): JSONObject = JSONObject()
         .put("id", task.id).put("project_id", task.projectId).put("name", task.name).put("description", task.description)
         .put("status", task.status).put("created_at", task.createdAt).put("finished_at", task.finishedAt)
-        .put("updated_at", task.updatedAt).put("deleted_at", task.deletedAt)
+        .put("updated_at", task.updatedAt).put("deleted_at", task.deletedAt).put("list_type", task.listType).put("position", task.position)
 
     private fun exportSubTask(subTask: SubTask): JSONObject = JSONObject()
         .put("id", subTask.id).put("task_id", subTask.taskId).put("name", subTask.name).put("description", subTask.description)
         .put("status", subTask.status).put("created_at", subTask.createdAt).put("finished_at", subTask.finishedAt)
-        .put("updated_at", subTask.updatedAt).put("deleted_at", subTask.deletedAt)
+        .put("updated_at", subTask.updatedAt).put("deleted_at", subTask.deletedAt).put("position", subTask.position)
 
     private fun List<JSONObject>.asArray(): JSONArray = JSONArray().also { array -> forEach { array.put(it) } }
 }

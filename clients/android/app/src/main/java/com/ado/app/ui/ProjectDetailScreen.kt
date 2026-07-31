@@ -26,6 +26,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -35,6 +36,7 @@ import com.ado.app.data.CalendarDailyItem
 import com.ado.app.data.CalendarEventReader
 import com.ado.app.data.Project
 import com.ado.app.data.Task
+import com.ado.app.data.Template
 import java.time.Instant
 import kotlinx.coroutines.launch
 
@@ -58,6 +60,8 @@ fun ProjectDetailScreen(
     var taskToEdit by remember { mutableStateOf<Task?>(null) }
     var taskToDelete by remember { mutableStateOf<Task?>(null) }
     var taskMoveProjects by remember { mutableStateOf<List<Project>>(emptyList()) }
+    var templates by remember { mutableStateOf<List<Template>>(emptyList()) }
+    var showListTypeDialog by remember { mutableStateOf(false) }
     var showPrintTaskSelection by remember { mutableStateOf(false) }
     var pendingDailyDate by remember { mutableStateOf<String?>(null) }
     var pendingCalendarDailyGeneration by remember { mutableStateOf<PendingDailyGeneration?>(null) }
@@ -159,6 +163,33 @@ fun ProjectDetailScreen(
         }
     }
 
+    fun openAddTask() {
+        scope.launch {
+            try {
+                templates = repository.getTemplates().data
+                showCreateTaskDialog = true
+            } catch (e: Exception) {
+                error = repository.friendlyError(e)
+            }
+        }
+    }
+
+    fun createTaskFromTemplate(template: Template) {
+        scope.launch {
+            error = null
+            message = null
+            try {
+                val created = repository.createTaskFromTemplate(projectId, template.templateKey)
+                tasks = repository.getTasks(projectId).data
+                refreshSubTaskCounts(tasks)
+                showCreateTaskDialog = false
+                message = "Created ${created.name} from ${template.name}."
+            } catch (e: Exception) {
+                error = repository.friendlyError(e)
+            }
+        }
+    }
+
     fun deleteTask(task: Task) {
         scope.launch {
             error = null
@@ -194,6 +225,19 @@ fun ProjectDetailScreen(
                     tasks.filterNot { it.id == updated.id }
                 }
                 taskToEdit = null
+            } catch (e: Exception) {
+                error = repository.friendlyError(e)
+            }
+        }
+    }
+
+    fun updateListType(listType: String) {
+        val current = project ?: return
+        scope.launch {
+            error = null
+            try {
+                project = repository.updateProjectListType(current, listType)
+                showListTypeDialog = false
             } catch (e: Exception) {
                 error = repository.friendlyError(e)
             }
@@ -300,7 +344,7 @@ fun ProjectDetailScreen(
         bottomActions = listOf(
             BottomBarAction(
                 label = "Add",
-                onClick = { showCreateTaskDialog = true },
+                onClick = { openAddTask() },
                 prominent = true,
             ),
             BottomBarAction(
@@ -323,6 +367,7 @@ fun ProjectDetailScreen(
             project?.let {
                 ProjectHeader(
                     project = it,
+                    onConfigureListType = { showListTypeDialog = true },
                 )
             }
 
@@ -394,9 +439,10 @@ fun ProjectDetailScreen(
             nameLabel = "Task name",
             bulkLabel = "Bulk tasks",
             bulkHelp = "Top-level lines create tasks. Indented lines create subtasks. Deeper indented lines become subtask descriptions.",
-            quickActionsLabel = "Generate",
+            quickActionsLabel = "Generate / template",
             quickActions = projectQuickAddActions(
                 project = project,
+                templates = templates,
                 onGenerateDaily = { date ->
                     showCreateTaskDialog = false
                     pendingDailyDate = date
@@ -404,6 +450,9 @@ fun ProjectDetailScreen(
                 onGenerateSeasonal = { templateKey ->
                     showCreateTaskDialog = false
                     generateSeasonal(templateKey)
+                },
+                onCreateFromTemplate = { template ->
+                    createTaskFromTemplate(template)
                 },
             ),
             onDismiss = { showCreateTaskDialog = false },
@@ -437,6 +486,17 @@ fun ProjectDetailScreen(
             onDismiss = { taskToDelete = null },
             onConfirm = { deleteTask(task) },
         )
+    }
+
+    project?.let { currentProject ->
+        if (showListTypeDialog) {
+            ListTypeDialog(
+                title = "Task list type",
+                currentType = currentProject.listType,
+                onDismiss = { showListTypeDialog = false },
+                onSave = ::updateListType,
+            )
+        }
     }
 
     taskToEdit?.let { task ->
@@ -571,10 +631,12 @@ private fun taskFinishedAt(task: Task): Instant {
 
 private fun projectQuickAddActions(
     project: Project?,
+    templates: List<Template>,
     onGenerateDaily: (String) -> Unit,
     onGenerateSeasonal: (String) -> Unit,
-): List<QuickAddAction> =
-    when (project?.coreKey) {
+    onCreateFromTemplate: (Template) -> Unit,
+): List<QuickAddAction> {
+    val generatedActions = when (project?.coreKey) {
         "daily" -> listOf(
             QuickAddAction("Daily Today") { onGenerateDaily("today") },
             QuickAddAction("Daily Tomorrow") { onGenerateDaily("tomorrow") },
@@ -588,15 +650,32 @@ private fun projectQuickAddActions(
         )
         else -> emptyList()
     }
+    return generatedActions + templates.map { template ->
+        QuickAddAction("From template: ${template.name}") { onCreateFromTemplate(template) }
+    }
+}
 
 @Composable
 private fun ProjectHeader(
     project: Project,
+    onConfigureListType: () -> Unit,
 ) {
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Text(
+                text = project.name,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.headlineSmall,
+            )
+            ListTypeSettingsButton(onClick = onConfigureListType)
+        }
         Text(
-            text = project.name,
-            style = MaterialTheme.typography.headlineSmall,
+            text = "list: ${listTypeLabel(project.listType)}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MutedTextColor,
         )
         if (project.description.isNotBlank()) {
             Text(project.description, style = MaterialTheme.typography.bodyMedium, color = MutedTextColor)

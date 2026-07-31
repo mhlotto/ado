@@ -14,3 +14,6 @@ clients/android/local.properties
 *.pem
 server.zip
 android.zip
+.DS_Store
+*.zip
+*.patch

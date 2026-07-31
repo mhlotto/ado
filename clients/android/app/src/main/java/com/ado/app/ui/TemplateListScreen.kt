@@ -85,6 +85,7 @@ private fun TemplateRow(template: Template, onClick: () -> Unit) {
         Column(modifier = Modifier.padding(14.dp)) {
             Text(template.name, style = MaterialTheme.typography.titleMedium)
             Text(template.templateKey, style = MaterialTheme.typography.bodySmall, color = MutedTextColor)
+            template.listType?.let { Text("type: $it", style = MaterialTheme.typography.bodySmall, color = MutedTextColor) }
             Text("${template.items.size} default subtasks", style = MaterialTheme.typography.bodySmall, color = MutedTextColor)
         }
     }

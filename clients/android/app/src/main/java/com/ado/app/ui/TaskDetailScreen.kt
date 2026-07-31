@@ -4,11 +4,13 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -17,6 +19,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextDecoration
@@ -25,6 +28,7 @@ import com.ado.app.data.AdoRepository
 import com.ado.app.data.Project
 import com.ado.app.data.SubTask
 import com.ado.app.data.Task
+import com.ado.app.data.Template
 import java.time.Instant
 import kotlinx.coroutines.launch
 
@@ -48,6 +52,8 @@ fun TaskDetailScreen(
     var subTaskToDelete by remember { mutableStateOf<SubTask?>(null) }
     var taskMoveProjects by remember { mutableStateOf<List<Project>>(emptyList()) }
     var subTaskMoveTasks by remember { mutableStateOf<List<Task>>(emptyList()) }
+    var templates by remember { mutableStateOf<List<Template>>(emptyList()) }
+    var showListTypeDialog by remember { mutableStateOf(false) }
     var simpleView by remember { mutableStateOf(false) }
     val rollUpCompleted by repository.rollUpCompletedFlow.collectAsState(initial = true)
     val dataRevision by repository.dataRevisionFlow.collectAsState(initial = 0)
@@ -160,6 +166,17 @@ fun TaskDetailScreen(
         }
     }
 
+    fun openAddSubTask() {
+        scope.launch {
+            try {
+                templates = repository.getTemplates().data
+                showCreateSubTaskDialog = true
+            } catch (e: Exception) {
+                error = repository.friendlyError(e)
+            }
+        }
+    }
+
     fun openEditSubTask(subTask: SubTask) {
         scope.launch {
             taskMoveProjects = repository.getTaskMoveProjectOptions()
@@ -201,6 +218,55 @@ fun TaskDetailScreen(
         }
     }
 
+    fun updateListType(listType: String) {
+        val current = task ?: return
+        scope.launch {
+            error = null
+            try {
+                task = repository.updateTaskListType(current, listType)
+                showListTypeDialog = false
+            } catch (e: Exception) {
+                error = repository.friendlyError(e)
+            }
+        }
+    }
+
+    fun moveSubTask(subTask: SubTask, delta: Int) {
+        scope.launch {
+            error = null
+            message = null
+            try {
+                subtasks = repository.moveUnfinishedSubTask(taskId, subTask.id, delta)
+            } catch (e: Exception) {
+                error = repository.friendlyError(e)
+            }
+        }
+    }
+
+    fun applyTemplate(template: Template) {
+        scope.launch {
+            error = null
+            message = null
+            try {
+                val result = repository.applyTemplateToTask(taskId, template.templateKey)
+                subtasks = repository.getSubTasks(taskId).data
+                showCreateSubTaskDialog = false
+                message = if (result.added == 0) {
+                    "No new subtasks to add from ${template.name}."
+                } else {
+                    "Added ${result.added} subtasks from ${template.name}."
+                }
+            } catch (e: Exception) {
+                error = repository.friendlyError(e)
+            }
+        }
+    }
+
+    fun shareCurrentTask() {
+        val currentTask = task ?: return
+        shareTask(context, currentTask, subtasks)
+    }
+
     fun printSubTasks() {
         val currentTask = task ?: return
         val items = subtasksInPrintOrder(subtasks).filterNot { it.isDone }.map { ChecklistPrintItem(it.name) }
@@ -221,7 +287,7 @@ fun TaskDetailScreen(
             ),
             BottomBarAction(
                 label = "Add",
-                onClick = { showCreateSubTaskDialog = true },
+                onClick = { openAddSubTask() },
                 prominent = true,
             ),
             BottomBarAction(
@@ -245,6 +311,8 @@ fun TaskDetailScreen(
                 TaskHeader(
                     task = it,
                     onLongPress = ::toggleTask,
+                    onShare = ::shareCurrentTask,
+                    onConfigureListType = { showListTypeDialog = true },
                 )
             }
 
@@ -255,6 +323,7 @@ fun TaskDetailScreen(
                     val unfinishedSubTasks = subtasks.filterNot { it.isDone }
                     val finishedSubTasks = subtasks.filter { it.isDone }.sortedBy(::subTaskFinishedAt)
                     items(unfinishedSubTasks, key = { it.id }) { subTask ->
+                        val index = unfinishedSubTasks.indexOf(subTask)
                         if (simpleView) {
                             SubTaskSimpleRow(
                                 subTask = subTask,
@@ -265,6 +334,10 @@ fun TaskDetailScreen(
                             SubTaskRow(
                                 subTask = subTask,
                                 onLongPress = { toggleSubTask(subTask) },
+                                onMoveUp = { moveSubTask(subTask, -1) },
+                                onMoveDown = { moveSubTask(subTask, 1) },
+                                canMoveUp = index > 0,
+                                canMoveDown = index < unfinishedSubTasks.lastIndex,
                                 onEdit = { openEditSubTask(subTask) },
                                 onDelete = { subTaskToDelete = subTask },
                             )
@@ -309,6 +382,10 @@ fun TaskDetailScreen(
             nameLabel = "Subtask name",
             bulkLabel = "Bulk subtasks",
             bulkHelp = "Top-level lines create subtasks. Indented lines become that subtask's description.",
+            quickActionsLabel = "Apply template",
+            quickActions = templates.map { template ->
+                QuickAddAction(template.name) { applyTemplate(template) }
+            },
             onDismiss = { showCreateSubTaskDialog = false },
             onSubmitSingle = { name, description -> createSubTask(name, description, emptyList()) },
             onSubmitBulk = ::createBulkSubTasks,
@@ -322,6 +399,17 @@ fun TaskDetailScreen(
             onDismiss = { subTaskToDelete = null },
             onConfirm = { deleteSubTask(subTask) },
         )
+    }
+
+    task?.let { currentTask ->
+        if (showListTypeDialog) {
+            ListTypeDialog(
+                title = "Subtask list type",
+                currentType = currentTask.listType,
+                onDismiss = { showListTypeDialog = false },
+                onSave = ::updateListType,
+            )
+        }
     }
 
     task?.let { currentTask ->
@@ -376,16 +464,33 @@ private fun subtasksInPrintOrder(subtasks: List<SubTask>): List<SubTask> =
 private fun TaskHeader(
     task: Task,
     onLongPress: () -> Unit,
+    onShare: () -> Unit,
+    onConfigureListType: () -> Unit,
 ) {
     Column(
         modifier = Modifier
             .padding(16.dp)
             .combinedClickable(onClick = {}, onLongClick = onLongPress),
     ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Text(
+                text = task.name,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.headlineSmall,
+                textDecoration = if (task.isDone) TextDecoration.LineThrough else TextDecoration.None,
+            )
+            TextButton(onClick = onShare) {
+                Text("Share")
+            }
+            ListTypeSettingsButton(onClick = onConfigureListType)
+        }
         Text(
-            text = task.name,
-            style = MaterialTheme.typography.headlineSmall,
-            textDecoration = if (task.isDone) TextDecoration.LineThrough else TextDecoration.None,
+            text = "list: ${listTypeLabel(task.listType)}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MutedTextColor,
         )
         if (task.description.isNotBlank()) {
             Text(task.description, style = MaterialTheme.typography.bodyLarge)

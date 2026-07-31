@@ -5,6 +5,18 @@ import org.json.JSONObject
 
 const val STATUS_TODO = "todo"
 const val STATUS_DONE = "done"
+const val LIST_TYPE_NORMAL = "normal"
+const val LIST_TYPE_DAILY = "daily"
+const val LIST_TYPE_MARKET = "market"
+const val LIST_TYPE_CHECKLIST = "checklist"
+const val LIST_TYPE_CUSTOM = "custom"
+val LIST_TYPES = listOf(
+    LIST_TYPE_NORMAL,
+    LIST_TYPE_DAILY,
+    LIST_TYPE_MARKET,
+    LIST_TYPE_CHECKLIST,
+    LIST_TYPE_CUSTOM,
+)
 
 data class TaskCounts(
     val total: Int = 0,
@@ -48,6 +60,7 @@ data class Project(
     val updatedAt: String,
     val deletedAt: String?,
     val taskCounts: TaskCounts = TaskCounts(),
+    val listType: String = LIST_TYPE_NORMAL,
 ) {
     companion object {
         fun fromJson(json: JSONObject): Project = Project(
@@ -61,6 +74,7 @@ data class Project(
             updatedAt = json.optString("updated_at"),
             deletedAt = json.optNullableString("deleted_at"),
             taskCounts = TaskCounts.fromJson(json.optJSONObject("task_counts")),
+            listType = json.optString("list_type", LIST_TYPE_NORMAL).ifBlank { LIST_TYPE_NORMAL },
         )
     }
 
@@ -75,6 +89,7 @@ data class Project(
         .put("updated_at", updatedAt)
         .putNullable("deleted_at", deletedAt)
         .put("task_counts", taskCounts.toJson())
+        .put("list_type", listType)
 }
 
 data class Task(
@@ -87,6 +102,8 @@ data class Task(
     val finishedAt: String?,
     val updatedAt: String,
     val deletedAt: String?,
+    val listType: String = LIST_TYPE_NORMAL,
+    val position: Int = -1,
 ) {
     val isDone: Boolean get() = status == STATUS_DONE
 
@@ -101,6 +118,8 @@ data class Task(
             finishedAt = json.optNullableString("finished_at"),
             updatedAt = json.optString("updated_at"),
             deletedAt = json.optNullableString("deleted_at"),
+            listType = json.optString("list_type", LIST_TYPE_NORMAL).ifBlank { LIST_TYPE_NORMAL },
+            position = json.optPosition(),
         )
     }
 
@@ -114,6 +133,8 @@ data class Task(
         .putNullable("finished_at", finishedAt)
         .put("updated_at", updatedAt)
         .putNullable("deleted_at", deletedAt)
+        .put("list_type", listType)
+        .put("position", position)
 }
 
 data class SubTask(
@@ -126,6 +147,7 @@ data class SubTask(
     val finishedAt: String?,
     val updatedAt: String,
     val deletedAt: String?,
+    val position: Int = -1,
 ) {
     val isDone: Boolean get() = status == STATUS_DONE
 
@@ -140,6 +162,7 @@ data class SubTask(
             finishedAt = json.optNullableString("finished_at"),
             updatedAt = json.optString("updated_at"),
             deletedAt = json.optNullableString("deleted_at"),
+            position = json.optPosition(),
         )
     }
 
@@ -153,6 +176,7 @@ data class SubTask(
         .putNullable("finished_at", finishedAt)
         .put("updated_at", updatedAt)
         .putNullable("deleted_at", deletedAt)
+        .put("position", position)
 }
 
 data class Template(
@@ -160,6 +184,7 @@ data class Template(
     val name: String,
     val projectCoreKey: String?,
     val description: String = "",
+    val listType: String? = null,
     val items: List<TemplateItem> = emptyList(),
 ) {
     companion object {
@@ -168,6 +193,7 @@ data class Template(
             name = json.optString("name"),
             projectCoreKey = json.optNullableString("project_core_key"),
             description = json.optString("description"),
+            listType = json.optNullableString("list_type"),
             items = json.optObjectArray("items").map(TemplateItem::fromJson),
         )
     }
@@ -177,6 +203,7 @@ data class Template(
         .put("name", name)
         .putNullable("project_core_key", projectCoreKey)
         .put("description", description)
+        .putNullable("list_type", listType)
         .put("items", items.map { it.toJson() }.toJsonArray())
 }
 
@@ -227,6 +254,8 @@ private fun JSONObject.putNullable(name: String, value: String?): JSONObject {
     }
     return this
 }
+
+private fun JSONObject.optPosition(): Int = if (has("position") && !isNull("position")) optInt("position", -1) else -1
 
 fun List<Any>.toJsonArray(): JSONArray {
     val array = JSONArray()
