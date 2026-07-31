@@ -495,7 +495,7 @@ fun TaskSimpleRow(task: Task, subTaskCounts: OpenDoneCounts? = null, onClick: ()
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 5.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(
+            HttpLinkText(
                 text = task.name,
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.bodyLarge,
@@ -546,13 +546,13 @@ fun TaskRow(
                 verticalAlignment = Alignment.Top,
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
+                    HttpLinkText(
                         text = task.name,
                         style = MaterialTheme.typography.titleMedium,
                         textDecoration = if (task.isDone) TextDecoration.LineThrough else TextDecoration.None,
                     )
                     if (task.description.isNotBlank()) {
-                        Text(task.description, style = MaterialTheme.typography.bodyMedium)
+                        HttpLinkText(task.description, style = MaterialTheme.typography.bodyMedium)
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         StatusText(
@@ -582,6 +582,7 @@ fun SubTaskSimpleRow(subTask: SubTask, onClick: () -> Unit, onLongPress: () -> U
         indicator = null,
         onClick = onClick,
         onLongPress = onLongPress,
+        linkify = true,
     )
 }
 
@@ -605,13 +606,13 @@ fun SubTaskRow(
             .combinedClickable(onClick = {}, onLongClick = onLongPress),
     ) {
         Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
-            Text(
+            HttpLinkText(
                 text = subTask.name,
                 style = MaterialTheme.typography.titleMedium,
                 textDecoration = if (subTask.isDone) TextDecoration.LineThrough else TextDecoration.None,
             )
             if (subTask.description.isNotBlank()) {
-                Text(subTask.description, style = MaterialTheme.typography.bodyMedium)
+                HttpLinkText(subTask.description, style = MaterialTheme.typography.bodyMedium)
             }
             StatusText(
                 status = subTask.status,
@@ -645,6 +646,7 @@ private fun SimpleNameRow(
     indicator: String?,
     onClick: () -> Unit,
     onLongPress: (() -> Unit)? = null,
+    linkify: Boolean = false,
 ) {
     val clickableModifier = if (onLongPress != null) {
         Modifier.combinedClickable(onClick = onClick, onLongClick = onLongPress)
@@ -661,12 +663,22 @@ private fun SimpleNameRow(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 5.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(
-                text = name,
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodyLarge,
-                textDecoration = if (isDone) TextDecoration.LineThrough else TextDecoration.None,
-            )
+            val nameDecoration = if (isDone) TextDecoration.LineThrough else TextDecoration.None
+            if (linkify) {
+                HttpLinkText(
+                    text = name,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyLarge,
+                    textDecoration = nameDecoration,
+                )
+            } else {
+                Text(
+                    text = name,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyLarge,
+                    textDecoration = nameDecoration,
+                )
+            }
             if (indicator != null) {
                 Text(
                     text = indicator,

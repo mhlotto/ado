@@ -476,7 +476,7 @@ private fun TaskHeader(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.Top,
         ) {
-            Text(
+            HttpLinkText(
                 text = task.name,
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.headlineSmall,
@@ -493,7 +493,7 @@ private fun TaskHeader(
             color = MutedTextColor,
         )
         if (task.description.isNotBlank()) {
-            Text(task.description, style = MaterialTheme.typography.bodyLarge)
+            HttpLinkText(task.description, style = MaterialTheme.typography.bodyLarge)
         }
         Row {
             Text("Status: ${task.status}", color = MaterialTheme.colorScheme.primary)
