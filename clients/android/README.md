@@ -21,11 +21,13 @@ make build
 make install
 ```
 
-`make install` builds the debug APK and installs it on a connected device with `adb install -r`. The Makefile uses `./gradlew` if present and falls back to system `gradle`; tools can be overridden:
+`make install` builds the debug APK with the checked-in Gradle wrapper and installs it on a connected device with `adb install -r`. The Makefile selects a Homebrew JDK 17 installation on macOS when `JAVA_HOME` is unset; tools can be overridden:
 
 ```sh
-GRADLE=./gradlew ADB=/path/to/adb make install
+JAVA_HOME=/path/to/jdk-17 ADB=/path/to/adb make install
 ```
+
+Run `make doctor` to print the selected Java, Gradle, and Android SDK versions and locations.
 
 There is no API endpoint or server address to configure for the Android app.
 
