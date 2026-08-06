@@ -3,7 +3,9 @@ package com.ado.app.data
 import android.content.Context
 import androidx.room.Dao
 import androidx.room.Database
+import androidx.room.ColumnInfo
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
@@ -20,14 +22,25 @@ data class ProjectEntity(
     val json: String,
 )
 
-@Entity(tableName = "tasks")
+@Entity(tableName = "tasks", indices = [Index(value = ["projectId"])])
 data class TaskEntity(
     @PrimaryKey val id: String,
     val projectId: String,
+    @ColumnInfo(defaultValue = "'todo'") val status: String,
     val json: String,
 )
 
-@Entity(tableName = "subtasks")
+data class ProjectTaskCountsRow(
+    val projectId: String,
+    val totalCount: Int,
+    val openCount: Int,
+    val todoCount: Int,
+    val inProgressCount: Int,
+    val doneCount: Int,
+    val archivedCount: Int,
+)
+
+@Entity(tableName = "subtasks", indices = [Index(value = ["taskId"])])
 data class SubTaskEntity(
     @PrimaryKey val id: String,
     val taskId: String,
@@ -53,6 +66,21 @@ interface AdoDao {
 
     @Query("DELETE FROM projects WHERE id = :id")
     suspend fun deleteProject(id: String)
+
+    @Query(
+        """
+        SELECT projectId,
+            CAST(COUNT(*) AS INTEGER) AS totalCount,
+            CAST(SUM(CASE WHEN status NOT IN ('done', 'archived') THEN 1 ELSE 0 END) AS INTEGER) AS openCount,
+            CAST(SUM(CASE WHEN status = 'todo' THEN 1 ELSE 0 END) AS INTEGER) AS todoCount,
+            CAST(SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) AS INTEGER) AS inProgressCount,
+            CAST(SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS INTEGER) AS doneCount,
+            CAST(SUM(CASE WHEN status = 'archived' THEN 1 ELSE 0 END) AS INTEGER) AS archivedCount
+        FROM tasks
+        GROUP BY projectId
+        """,
+    )
+    suspend fun getTaskCountsByProject(): List<ProjectTaskCountsRow>
 
     @Query("SELECT json FROM tasks WHERE projectId = :projectId ORDER BY json")
     suspend fun getTasks(projectId: String): List<String>
@@ -101,7 +129,7 @@ interface AdoDao {
         SubTaskEntity::class,
         TemplateEntity::class,
     ],
-    version = 4,
+    version = 6,
     exportSchema = false,
 )
 abstract class AdoDatabase : RoomDatabase() {
@@ -120,6 +148,8 @@ abstract class AdoDatabase : RoomDatabase() {
                     .addMigrations(MIGRATION_1_2)
                     .addMigrations(MIGRATION_2_3)
                     .addMigrations(MIGRATION_3_4)
+                    .addMigrations(MIGRATION_4_5)
+                    .addMigrations(MIGRATION_5_6)
                     .build()
                     .also { instance = it }
             }
@@ -175,6 +205,35 @@ abstract class AdoDatabase : RoomDatabase() {
                 db.execSQL("DROP TABLE IF EXISTS pending_mutations")
             }
         }
+
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_tasks_projectId ON tasks (projectId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_subtasks_taskId ON subtasks (taskId)")
+            }
+        }
+
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE tasks ADD COLUMN status TEXT NOT NULL DEFAULT 'todo'")
+                val statuses = mutableListOf<Pair<String, String>>()
+                db.query("SELECT id, json FROM tasks").use { cursor ->
+                    val idColumn = cursor.getColumnIndexOrThrow("id")
+                    val jsonColumn = cursor.getColumnIndexOrThrow("json")
+                    while (cursor.moveToNext()) {
+                        val status = try {
+                            JSONObject(cursor.getString(jsonColumn)).optString("status", STATUS_TODO).ifBlank { STATUS_TODO }
+                        } catch (_: Exception) {
+                            STATUS_TODO
+                        }
+                        statuses += cursor.getString(idColumn) to status
+                    }
+                }
+                statuses.forEach { (id, status) ->
+                    db.execSQL("UPDATE tasks SET status = ? WHERE id = ?", arrayOf(status, id))
+                }
+            }
+        }
     }
 }
 
@@ -195,6 +254,18 @@ class RoomLocalStore(context: Context) : LocalStore {
         dao.deleteProject(projectId)
         dao.deleteTasksForProject(projectId)
     }
+
+    override suspend fun getTaskCountsByProject(): Map<String, TaskCounts> =
+        dao.getTaskCountsByProject().associate { row ->
+            row.projectId to TaskCounts(
+                total = row.totalCount,
+                open = row.openCount,
+                todo = row.todoCount,
+                inProgress = row.inProgressCount,
+                done = row.doneCount,
+                archived = row.archivedCount,
+            )
+        }
 
     override suspend fun getTasks(projectId: String): List<Task> =
         dao.getTasks(projectId).map { Task.fromJson(JSONObject(it)) }
@@ -239,7 +310,7 @@ class RoomLocalStore(context: Context) : LocalStore {
         ProjectEntity(project.id, project.toJson().toString())
 
     private fun taskEntity(task: Task) =
-        TaskEntity(task.id, task.projectId, task.toJson().toString())
+        TaskEntity(task.id, task.projectId, task.status, task.toJson().toString())
 
     private fun subTaskEntity(subTask: SubTask) =
         SubTaskEntity(subTask.id, subTask.taskId, subTask.toJson().toString())

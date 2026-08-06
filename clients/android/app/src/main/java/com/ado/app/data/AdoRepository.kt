@@ -11,6 +11,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 private data class DailyGeneratedSubTask(val name: String, val description: String)
+private const val POSITION_NORMALIZATION_VERSION = 1
 private data class ImportedDataset(
     val projects: List<Project>,
     val tasks: List<Task>,
@@ -49,6 +50,10 @@ class AdoRepository(
 
     suspend fun setRollUpCompleted(enabled: Boolean) {
         settingsStore.saveRollUpCompleted(enabled)
+    }
+
+    suspend fun initialize() {
+        ensureInitialized()
     }
 
     suspend fun getProjects(): LoadResult<List<Project>> {
@@ -481,7 +486,10 @@ class AdoRepository(
 
     private suspend fun ensureInitialized() {
         if (initialized) return
-        normalizeStoredPositions()
+        if (settingsStore.positionNormalizationVersion() < POSITION_NORMALIZATION_VERSION) {
+            normalizeStoredPositions()
+            settingsStore.savePositionNormalizationVersion(POSITION_NORMALIZATION_VERSION)
+        }
         ensureCoreProject("Daily", "daily", LIST_TYPE_DAILY)
         ensureCoreProject("Home", "home", LIST_TYPE_CHECKLIST)
         ensureTemplates()
@@ -490,11 +498,16 @@ class AdoRepository(
 
     private suspend fun normalizeStoredPositions() {
         localStore.getProjects().forEach { project ->
-            localStore.saveProject(project)
-            val tasks = normalizedTasks(localStore.getTasks(project.id))
-            tasks.forEach { task ->
-                localStore.saveTask(task)
-                normalizedSubTasks(localStore.getSubTasks(task.id)).forEach { localStore.saveSubTask(it) }
+            val storedTasks = localStore.getTasks(project.id)
+            val normalizedTaskList = normalizedTasks(storedTasks)
+            storedTasks.zip(normalizedTaskList).forEach { (stored, normalized) ->
+                if (stored != normalized) localStore.saveTask(normalized)
+
+                val storedSubTasks = localStore.getSubTasks(stored.id)
+                val normalizedSubTaskList = normalizedSubTasks(storedSubTasks)
+                storedSubTasks.zip(normalizedSubTaskList).forEach { (storedSubTask, normalizedSubTask) ->
+                    if (storedSubTask != normalizedSubTask) localStore.saveSubTask(normalizedSubTask)
+                }
             }
         }
     }
@@ -539,19 +552,15 @@ class AdoRepository(
         items = names.mapIndexed { position, item -> TemplateItem(newId(), item, "", position) },
     )
 
-    private suspend fun projectsWithCounts(): List<Project> = localStore.getProjects().map { withTaskCounts(it) }
-        .sortedBy { it.name.lowercase() }
+    private suspend fun projectsWithCounts(): List<Project> {
+        val countsByProject = localStore.getTaskCountsByProject()
+        return localStore.getProjects()
+            .map { project -> project.copy(taskCounts = countsByProject[project.id] ?: TaskCounts()) }
+            .sortedBy { it.name.lowercase() }
+    }
 
     private suspend fun withTaskCounts(project: Project): Project {
-        val tasks = localStore.getTasks(project.id)
-        return project.copy(taskCounts = TaskCounts(
-            total = tasks.size,
-            open = tasks.count { it.status != STATUS_DONE && it.status != "archived" },
-            todo = tasks.count { it.status == STATUS_TODO },
-            inProgress = tasks.count { it.status == "in_progress" },
-            done = tasks.count { it.status == STATUS_DONE },
-            archived = tasks.count { it.status == "archived" },
-        ))
+        return project.copy(taskCounts = localStore.getTaskCountsByProject()[project.id] ?: TaskCounts())
     }
 
     private suspend fun coreProject(key: String): Project = localStore.getProjects().first { it.coreKey == key }

@@ -5,6 +5,7 @@ interface LocalStore {
     suspend fun getProject(projectId: String): Project?
     suspend fun saveProject(project: Project)
     suspend fun deleteProject(projectId: String)
+    suspend fun getTaskCountsByProject(): Map<String, TaskCounts>
     suspend fun getTasks(projectId: String): List<Task>
     suspend fun getTask(taskId: String): Task?
     suspend fun saveTask(task: Task)

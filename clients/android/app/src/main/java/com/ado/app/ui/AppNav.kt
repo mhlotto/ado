@@ -18,6 +18,8 @@ fun AppNav(repository: AdoRepository) {
     NavHost(navController = navController, startDestination = "splash") {
         composable("splash") {
             SplashScreen(
+                initialize = repository::initialize,
+                friendlyError = repository::friendlyError,
                 onFinished = {
                     navController.navigate("projects") {
                         popUpTo("splash") { inclusive = true }
