@@ -401,8 +401,8 @@ class AdoRepository(
         val tasks = projects.flatMap { localStore.getTasks(it.id) }
         val subtasks = tasks.flatMap { localStore.getSubTasks(it.id) }
         val root = JSONObject()
-            .put("format", "ado-local-export")
-            .put("version", 2)
+            .put("format", BACKUP_FORMAT)
+            .put("version", CURRENT_BACKUP_VERSION)
             .put("exported_at", now())
             .put("projects", projects.map(::exportProject).asArray())
             .put("tasks", tasks.map(::exportTask).asArray())
@@ -412,8 +412,8 @@ class AdoRepository(
     }
 
     suspend fun previewImport(json: String): ImportPreview {
-        ensureInitialized()
         val incoming = parseImport(json)
+        ensureInitialized()
         val existingProjects = localStore.getProjects()
         val existingTasks = existingProjects.flatMap { localStore.getTasks(it.id) }
         val existingSubTasks = existingTasks.flatMap { localStore.getSubTasks(it.id) }
@@ -426,8 +426,8 @@ class AdoRepository(
     }
 
     suspend fun importData(json: String, overwrite: Boolean): ImportResult {
-        ensureInitialized()
         val incoming = parseImport(json)
+        ensureInitialized()
         var imported = 0
         var skipped = 0
         var conflicts = 0
@@ -621,11 +621,14 @@ class AdoRepository(
         subTasks.sortedWith(compareBy<SubTask> { it.position.takeIf { position -> position >= 0 } ?: Int.MAX_VALUE }.thenBy { it.createdAt })
 
     private fun parseImport(raw: String): ImportedDataset {
-        val root = try { JSONObject(raw) } catch (_: Exception) { throw IllegalArgumentException("Invalid backup file.") }
-        if (root.optString("format") != "ado-local-export") throw IllegalArgumentException("Not an ado backup file.")
+        val root = parseCurrentBackup(raw)
         fun objects(name: String): List<JSONObject> {
-            val array = root.optJSONArray(name) ?: JSONArray()
-            return List(array.length()) { array.getJSONObject(it) }
+            val array = root.getJSONArray(name)
+            return try {
+                List(array.length()) { array.getJSONObject(it) }
+            } catch (_: Exception) {
+                throw IllegalArgumentException("Invalid backup file: '$name' must contain JSON objects.")
+            }
         }
         return ImportedDataset(
             projects = objects("projects").map(Project::fromJson),

@@ -47,6 +47,8 @@ Settings includes:
 
 An import checks for records that match items already on the phone. If matches exist, the app asks whether to overwrite matching local records or keep existing local values while importing new records. Reinstalling or clearing app data deletes the Room database, so export a backup first when the data matters.
 
+JSON backups have an independent format name and version. This build writes and accepts `ado-local-export` version 2. Imports reject missing, older, or newer unsupported versions before changing local data. Future backup-format changes should add an explicit migration to the current in-memory format rather than coupling backup versions to Room database versions.
+
 ## Migration From The Server-Backed Build
 
 Earlier builds used this same Room database as a cache and included a backend mutation queue. The standalone build migrates visible projects, tasks, and subtasks into local-only Room tables and drops backend sync metadata and the obsolete outbound queue. Records already marked for deletion remain deleted. No online/offline toggle, pending-state indicator, queue screen, or server URL setting is exposed or used.
