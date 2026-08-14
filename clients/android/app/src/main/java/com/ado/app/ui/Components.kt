@@ -31,6 +31,7 @@ import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Scaffold
@@ -224,16 +225,23 @@ fun BottomFloatingActionBar(
 
 @Composable
 private fun AppBarNavigationSlot(onBack: (() -> Unit)?) {
+    val navigationModifier = if (onBack != null) {
+        Modifier
+            .clickable(onClick = onBack)
+            .semantics { contentDescription = "Back" }
+    } else {
+        Modifier
+    }
     Box(
-        modifier = Modifier.size(width = 56.dp, height = 48.dp),
+        modifier = Modifier
+            .size(width = 56.dp, height = 48.dp)
+            .then(navigationModifier),
         contentAlignment = Alignment.Center,
     ) {
         if (onBack != null) {
             Text(
                 text = "<",
-                modifier = Modifier
-                    .clickable(onClick = onBack)
-                    .padding(horizontal = 18.dp, vertical = 10.dp),
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
                 color = MaterialTheme.colorScheme.primary,
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
@@ -762,8 +770,9 @@ private fun CompactTextAction(label: String, onClick: () -> Unit, enabled: Boole
     Text(
         text = label,
         modifier = Modifier
+            .minimumInteractiveComponentSize()
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(vertical = 2.dp),
+            .padding(horizontal = 6.dp, vertical = 2.dp),
         color = if (enabled) MaterialTheme.colorScheme.primary else MutedTextColor,
         style = MaterialTheme.typography.labelLarge,
     )
