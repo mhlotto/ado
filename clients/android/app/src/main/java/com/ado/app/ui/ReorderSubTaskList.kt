@@ -147,6 +147,11 @@ private fun ReorderSubTaskRow(
             .zIndex(if (isDragging) 1f else 0f)
             .graphicsLayer { translationY = dragOffset }
             .then(rowDragModifier),
+        colors = if (isDragging) {
+            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        } else {
+            CardDefaults.cardColors()
+        },
         elevation = CardDefaults.cardElevation(defaultElevation = if (isDragging) 8.dp else 0.dp),
     ) {
         Row(
