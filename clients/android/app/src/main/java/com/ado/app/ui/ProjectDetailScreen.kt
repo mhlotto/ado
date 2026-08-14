@@ -16,8 +16,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -32,10 +30,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import com.ado.app.R
 import com.ado.app.data.AdoRepository
 import com.ado.app.data.CalendarDailyItem
 import com.ado.app.data.CalendarEventReader
@@ -63,6 +59,8 @@ fun ProjectDetailScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     var showCreateTaskDialog by remember { mutableStateOf(false) }
+    var showBulkTaskDialog by remember { mutableStateOf(false) }
+    var showTemplateTaskDialog by remember { mutableStateOf(false) }
     var taskToEdit by remember { mutableStateOf<Task?>(null) }
     var taskToDelete by remember { mutableStateOf<Task?>(null) }
     var taskMoveProjects by remember { mutableStateOf<List<Project>>(emptyList()) }
@@ -161,7 +159,7 @@ fun ProjectDetailScreen(
                 }
                 tasks = repository.getTasks(projectId).data
                 refreshSubTaskCounts(tasks)
-                showCreateTaskDialog = false
+                showBulkTaskDialog = false
                 message = "Created ${createdTasks.size} tasks and $createdSubTasks subtasks."
             } catch (e: Exception) {
                 tasks = repository.getTasks(projectId).data
@@ -172,10 +170,14 @@ fun ProjectDetailScreen(
     }
 
     fun openAddTask() {
+        showCreateTaskDialog = true
+    }
+
+    fun openTemplateTask() {
         scope.launch {
             try {
                 templates = repository.getTemplates().data
-                showCreateTaskDialog = true
+                showTemplateTaskDialog = true
             } catch (e: Exception) {
                 error = repository.friendlyError(e)
             }
@@ -190,7 +192,7 @@ fun ProjectDetailScreen(
                 val created = repository.createTaskFromTemplate(projectId, template.templateKey)
                 tasks = repository.getTasks(projectId).data
                 refreshSubTaskCounts(tasks)
-                showCreateTaskDialog = false
+                showTemplateTaskDialog = false
                 message = "Created ${created.name} from ${template.name}."
             } catch (e: Exception) {
                 error = repository.friendlyError(e)
@@ -377,7 +379,20 @@ fun ProjectDetailScreen(
                 label = "Add",
                 onClick = { openAddTask() },
                 prominent = true,
+                longPressMenu = listOf(
+                    BottomBarMenuAction("Single") { openAddTask() },
+                    BottomBarMenuAction("Bulk") { showBulkTaskDialog = true },
+                    BottomBarMenuAction("Template") { openTemplateTask() },
+                ),
             ),
+            if (tasks.size >= 2 && project?.coreKey != "daily") {
+                BottomBarAction(
+                    label = "Reorder",
+                    onClick = { reorderMode = true },
+                )
+            } else {
+                null
+            },
             BottomBarAction(
                 label = if (simpleView) "Full" else "Simple",
                 onClick = { simpleView = !simpleView },
@@ -387,7 +402,7 @@ fun ProjectDetailScreen(
                 onClick = { showPrintTaskSelection = true },
                 enabled = project != null && tasks.any { !it.isDone },
             ),
-        ),
+        ).filterNotNull(),
     ) { padding ->
         Column(modifier = padding) {
             if (error != null) {
@@ -446,14 +461,6 @@ fun ProjectDetailScreen(
                                 modifier = Modifier.weight(1f),
                                 style = MaterialTheme.typography.titleMedium,
                             )
-                            if (tasks.size >= 2 && project?.coreKey != "daily") {
-                                IconButton(onClick = { reorderMode = true }) {
-                                    Icon(
-                                        painter = painterResource(R.drawable.ic_reorder_24),
-                                        contentDescription = "Reorder tasks",
-                                    )
-                                }
-                            }
                         }
                     }
                     items(unfinishedTasks, key = { it.id }) { task ->
@@ -516,30 +523,43 @@ fun ProjectDetailScreen(
     }
 
     if (showCreateTaskDialog) {
-        BulkCreateDialog(
+        EntityFormDialog(
             title = "New task",
             nameLabel = "Task name",
+            onDismiss = { showCreateTaskDialog = false },
+            onSubmit = { name, description, _ -> createTask(name, description, emptyList()) },
+        )
+    }
+
+    if (showBulkTaskDialog) {
+        BulkTextCreateDialog(
+            title = "Bulk tasks",
             bulkLabel = "Bulk tasks",
             bulkHelp = "Top-level lines create tasks. Indented lines create subtasks. Deeper indented lines become subtask descriptions.",
-            quickActionsLabel = "Generate / template",
-            quickActions = projectQuickAddActions(
+            onDismiss = { showBulkTaskDialog = false },
+            onSubmitBulk = ::createBulkTasks,
+        )
+    }
+
+    if (showTemplateTaskDialog) {
+        QuickAddDialog(
+            title = "Template",
+            actions = projectQuickAddActions(
                 project = project,
                 templates = templates,
                 onGenerateDaily = { date ->
-                    showCreateTaskDialog = false
+                    showTemplateTaskDialog = false
                     pendingDailyDate = date
                 },
                 onGenerateSeasonal = { templateKey ->
-                    showCreateTaskDialog = false
+                    showTemplateTaskDialog = false
                     generateSeasonal(templateKey)
                 },
                 onCreateFromTemplate = { template ->
                     createTaskFromTemplate(template)
                 },
             ),
-            onDismiss = { showCreateTaskDialog = false },
-            onSubmitSingle = { name, description -> createTask(name, description, emptyList()) },
-            onSubmitBulk = ::createBulkTasks,
+            onDismiss = { showTemplateTaskDialog = false },
         )
     }
 

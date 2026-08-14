@@ -10,8 +10,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -25,10 +23,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
-import com.ado.app.R
 import com.ado.app.data.AdoRepository
 import com.ado.app.data.Project
 import com.ado.app.data.SubTask
@@ -53,6 +49,8 @@ fun TaskDetailScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     var showCreateSubTaskDialog by remember { mutableStateOf(false) }
+    var showBulkSubTaskDialog by remember { mutableStateOf(false) }
+    var showTemplateSubTaskDialog by remember { mutableStateOf(false) }
     var showEditTaskDialog by remember { mutableStateOf(false) }
     var subTaskToEdit by remember { mutableStateOf<SubTask?>(null) }
     var subTaskToDelete by remember { mutableStateOf<SubTask?>(null) }
@@ -143,7 +141,7 @@ fun TaskDetailScreen(
                     created += repository.createSubTask(taskId, draft.name, draft.description)
                 }
                 subtasks = repository.getSubTasks(taskId).data
-                showCreateSubTaskDialog = false
+                showBulkSubTaskDialog = false
                 message = "Created ${created.size} subtasks."
             } catch (e: Exception) {
                 subtasks = repository.getSubTasks(taskId).data
@@ -175,10 +173,14 @@ fun TaskDetailScreen(
     }
 
     fun openAddSubTask() {
+        showCreateSubTaskDialog = true
+    }
+
+    fun openTemplateSubTask() {
         scope.launch {
             try {
                 templates = repository.getTemplates().data
-                showCreateSubTaskDialog = true
+                showTemplateSubTaskDialog = true
             } catch (e: Exception) {
                 error = repository.friendlyError(e)
             }
@@ -263,7 +265,7 @@ fun TaskDetailScreen(
             try {
                 val result = repository.applyTemplateToTask(taskId, template.templateKey)
                 subtasks = repository.getSubTasks(taskId).data
-                showCreateSubTaskDialog = false
+                showTemplateSubTaskDialog = false
                 message = if (result.added == 0) {
                     "No new subtasks to add from ${template.name}."
                 } else {
@@ -308,7 +310,20 @@ fun TaskDetailScreen(
                 label = "Add",
                 onClick = { openAddSubTask() },
                 prominent = true,
+                longPressMenu = listOf(
+                    BottomBarMenuAction("Single") { openAddSubTask() },
+                    BottomBarMenuAction("Bulk") { showBulkSubTaskDialog = true },
+                    BottomBarMenuAction("Template") { openTemplateSubTask() },
+                ),
             ),
+            if (subtasks.size >= 2) {
+                BottomBarAction(
+                    label = "Reorder",
+                    onClick = { reorderMode = true },
+                )
+            } else {
+                null
+            },
             BottomBarAction(
                 label = if (simpleView) "Full" else "Simple",
                 onClick = { simpleView = !simpleView },
@@ -318,7 +333,7 @@ fun TaskDetailScreen(
                 onClick = ::printSubTasks,
                 enabled = task != null && subtasks.any { !it.isDone },
             ),
-        ),
+        ).filterNotNull(),
     ) { padding ->
         Column(modifier = padding) {
             if (error != null) {
@@ -378,14 +393,6 @@ fun TaskDetailScreen(
                                 modifier = Modifier.weight(1f),
                                 style = MaterialTheme.typography.titleMedium,
                             )
-                            if (subtasks.size >= 2) {
-                                IconButton(onClick = { reorderMode = true }) {
-                                    Icon(
-                                        painter = painterResource(R.drawable.ic_reorder_24),
-                                        contentDescription = "Reorder items",
-                                    )
-                                }
-                            }
                         }
                     }
                     items(unfinishedSubTasks, key = { it.id }) { subTask ->
@@ -442,18 +449,31 @@ fun TaskDetailScreen(
     }
 
     if (showCreateSubTaskDialog) {
-        BulkCreateDialog(
+        EntityFormDialog(
             title = "New subtask",
             nameLabel = "Subtask name",
+            onDismiss = { showCreateSubTaskDialog = false },
+            onSubmit = { name, description, _ -> createSubTask(name, description, emptyList()) },
+        )
+    }
+
+    if (showBulkSubTaskDialog) {
+        BulkTextCreateDialog(
+            title = "Bulk subtasks",
             bulkLabel = "Bulk subtasks",
             bulkHelp = "Top-level lines create subtasks. Indented lines become that subtask's description.",
-            quickActionsLabel = "Apply template",
-            quickActions = templates.map { template ->
+            onDismiss = { showBulkSubTaskDialog = false },
+            onSubmitBulk = ::createBulkSubTasks,
+        )
+    }
+
+    if (showTemplateSubTaskDialog) {
+        QuickAddDialog(
+            title = "Template",
+            actions = templates.map { template ->
                 QuickAddAction(template.name) { applyTemplate(template) }
             },
-            onDismiss = { showCreateSubTaskDialog = false },
-            onSubmitSingle = { name, description -> createSubTask(name, description, emptyList()) },
-            onSubmitBulk = ::createBulkSubTasks,
+            onDismiss = { showTemplateSubTaskDialog = false },
         )
     }
 

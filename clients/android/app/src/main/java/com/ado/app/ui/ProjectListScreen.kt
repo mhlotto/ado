@@ -96,6 +96,9 @@ fun ProjectListScreen(
                 label = "Add",
                 onClick = { showCreateDialog = true },
                 prominent = true,
+                longPressMenu = listOf(
+                    BottomBarMenuAction("Single") { showCreateDialog = true },
+                ),
             ),
             BottomBarAction(
                 label = if (simpleView) "Full" else "Simple",

@@ -25,6 +25,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
@@ -37,6 +38,7 @@ import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -47,12 +49,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -84,6 +88,12 @@ data class BottomBarAction(
     val enabled: Boolean = true,
     val prominent: Boolean = false,
     val emphasized: Boolean = false,
+    val longPressMenu: List<BottomBarMenuAction> = emptyList(),
+)
+
+data class BottomBarMenuAction(
+    val label: String,
+    val onClick: () -> Unit,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -169,6 +179,7 @@ private fun Modifier.swipeLeftToBack(
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun BottomFloatingActionBar(
     actions: List<BottomBarAction>,
@@ -183,31 +194,83 @@ fun BottomFloatingActionBar(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
             elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
         ) {
-            Row(
+            FlowRow(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                actions.take(4).forEach { action ->
-                    if (action.prominent) {
-                        Button(
-                            onClick = action.onClick,
-                            enabled = action.enabled,
-                        ) {
-                            Text(action.label)
-                        }
-                    } else {
-                        TextButton(
-                            onClick = action.onClick,
-                            enabled = action.enabled,
-                        ) {
-                            Text(
-                                text = action.label,
-                                fontWeight = if (action.emphasized) FontWeight.Bold else FontWeight.Normal,
-                            )
-                        }
-                    }
+                actions.forEach { action ->
+                    BottomActionControl(action)
                 }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun BottomActionControl(action: BottomBarAction) {
+    var menuExpanded by remember(action.label) { mutableStateOf(false) }
+
+    Box {
+        if (action.prominent && action.longPressMenu.isNotEmpty()) {
+            val containerColor = if (action.enabled) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+            }
+            val contentColor = if (action.enabled) {
+                MaterialTheme.colorScheme.onPrimary
+            } else {
+                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+            }
+            Surface(
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .clip(RoundedCornerShape(20.dp))
+                    .combinedClickable(
+                        enabled = action.enabled,
+                        role = Role.Button,
+                        onClick = action.onClick,
+                        onLongClickLabel = "More add options",
+                        onLongClick = { menuExpanded = true },
+                    ),
+                shape = RoundedCornerShape(20.dp),
+                color = containerColor,
+                contentColor = contentColor,
+            ) {
+                Box(
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 10.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(action.label, style = MaterialTheme.typography.labelLarge)
+                }
+            }
+        } else if (action.prominent) {
+            Button(onClick = action.onClick, enabled = action.enabled) {
+                Text(action.label)
+            }
+        } else {
+            TextButton(onClick = action.onClick, enabled = action.enabled) {
+                Text(
+                    text = action.label,
+                    fontWeight = if (action.emphasized) FontWeight.Bold else FontWeight.Normal,
+                )
+            }
+        }
+
+        DropdownMenu(
+            expanded = menuExpanded,
+            onDismissRequest = { menuExpanded = false },
+        ) {
+            action.longPressMenu.forEach { menuAction ->
+                DropdownMenuItem(
+                    text = { Text(menuAction.label) },
+                    onClick = {
+                        menuExpanded = false
+                        menuAction.onClick()
+                    },
+                )
             }
         }
     }
@@ -1024,32 +1087,17 @@ fun MoveEntityFormDialog(
     )
 }
 
-private enum class CreateMode { Single, Bulk }
-
 data class QuickAddAction(val label: String, val onClick: () -> Unit)
 
-@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
-fun BulkCreateDialog(
+fun BulkTextCreateDialog(
     title: String,
-    nameLabel: String,
     bulkLabel: String,
     bulkHelp: String,
-    quickActionsLabel: String? = null,
-    quickActions: List<QuickAddAction> = emptyList(),
     onDismiss: () -> Unit,
-    onSubmitSingle: (name: String, description: String) -> Unit,
     onSubmitBulk: (text: String) -> Unit,
 ) {
-    var mode by remember(title) { mutableStateOf(CreateMode.Single) }
-    var name by remember(title) { mutableStateOf("") }
-    var description by remember(title) { mutableStateOf("") }
     var bulkText by remember(title) { mutableStateOf("") }
-    var quickActionsExpanded by remember(title, quickActions) { mutableStateOf(false) }
-    val canSubmit = when (mode) {
-        CreateMode.Single -> name.trim().isNotEmpty()
-        CreateMode.Bulk -> bulkText.trim().isNotEmpty()
-    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1061,87 +1109,20 @@ fun BulkCreateDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                if (quickActions.isNotEmpty()) {
-                    ExposedDropdownMenuBox(
-                        expanded = quickActionsExpanded,
-                        onExpandedChange = { quickActionsExpanded = !quickActionsExpanded },
-                    ) {
-                        OutlinedTextField(
-                            value = "",
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text(quickActionsLabel ?: "Quick add") },
-                            placeholder = { Text("Choose generated list") },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = quickActionsExpanded) },
-                            modifier = Modifier
-                                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                                .fillMaxWidth(),
-                        )
-                        ExposedDropdownMenu(
-                            expanded = quickActionsExpanded,
-                            onDismissRequest = { quickActionsExpanded = false },
-                        ) {
-                            quickActions.forEach { action ->
-                                DropdownMenuItem(
-                                    text = { Text(action.label) },
-                                    onClick = {
-                                        quickActionsExpanded = false
-                                        action.onClick()
-                                    },
-                                )
-                            }
-                        }
-                    }
-                    HorizontalDivider()
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ModeButton(
-                        label = "Single",
-                        selected = mode == CreateMode.Single,
-                        onClick = { mode = CreateMode.Single },
-                    )
-                    ModeButton(
-                        label = "Bulk",
-                        selected = mode == CreateMode.Bulk,
-                        onClick = { mode = CreateMode.Bulk },
-                    )
-                }
-                if (mode == CreateMode.Single) {
-                    OutlinedTextField(
-                        value = name,
-                        onValueChange = { name = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text(nameLabel) },
-                        singleLine = true,
-                    )
-                    OutlinedTextField(
-                        value = description,
-                        onValueChange = { description = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Description") },
-                    )
-                } else {
-                    Text(bulkHelp, style = MaterialTheme.typography.bodySmall, color = MutedTextColor)
-                    OutlinedTextField(
-                        value = bulkText,
-                        onValueChange = { bulkText = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text(bulkLabel) },
-                        minLines = 8,
-                    )
-                }
+                Text(bulkHelp, style = MaterialTheme.typography.bodySmall, color = MutedTextColor)
+                OutlinedTextField(
+                    value = bulkText,
+                    onValueChange = { bulkText = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(bulkLabel) },
+                    minLines = 8,
+                )
             }
         },
         confirmButton = {
             TextButton(
-                enabled = canSubmit,
-                onClick = {
-                    if (mode == CreateMode.Single) {
-                        onSubmitSingle(name.trim(), description.trim())
-                    } else {
-                        onSubmitBulk(bulkText)
-                    }
-                },
+                enabled = bulkText.trim().isNotEmpty(),
+                onClick = { onSubmitBulk(bulkText) },
             ) {
                 Text("Save")
             }
@@ -1153,12 +1134,33 @@ fun BulkCreateDialog(
 }
 
 @Composable
-private fun ModeButton(label: String, selected: Boolean, onClick: () -> Unit) {
-    if (selected) {
-        Button(onClick = onClick) { Text(label) }
-    } else {
-        TextButton(onClick = onClick) { Text(label) }
-    }
+fun QuickAddDialog(
+    title: String,
+    actions: List<QuickAddAction>,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                actions.forEach { action ->
+                    DropdownMenuItem(
+                        text = { Text(action.label) },
+                        onClick = action.onClick,
+                    )
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
 }
 
 @Composable
