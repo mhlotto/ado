@@ -338,7 +338,7 @@ fun ProjectDetailScreen(
     LaunchedEffect(projectId, dataRevision) { refresh() }
 
     AdoScaffold(
-        title = "Tasks",
+        title = project?.name ?: "Project",
         onBack = onBack,
         onSettings = onOpenSettings,
         bottomActions = listOf(

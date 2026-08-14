@@ -276,7 +276,7 @@ fun TaskDetailScreen(
     LaunchedEffect(taskId, dataRevision) { refresh() }
 
     AdoScaffold(
-        title = "Subtasks",
+        title = task?.name ?: "Task",
         onBack = onBack,
         onSettings = onOpenSettings,
         bottomActions = listOf(
