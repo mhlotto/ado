@@ -24,6 +24,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
@@ -48,6 +49,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
@@ -484,7 +487,13 @@ fun ProjectRow(project: Project, onClick: () -> Unit, onEdit: (() -> Unit)? = nu
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun TaskSimpleRow(task: Task, subTaskCounts: OpenDoneCounts? = null, onClick: () -> Unit, onLongPress: () -> Unit) {
+fun TaskSimpleRow(
+    task: Task,
+    subTaskCounts: OpenDoneCounts? = null,
+    onClick: () -> Unit,
+    onToggle: () -> Unit,
+    onLongPress: () -> Unit,
+) {
     val clickableModifier = Modifier.combinedClickable(onClick = onClick, onLongClick = onLongPress)
     Column(
         modifier = Modifier
@@ -494,7 +503,9 @@ fun TaskSimpleRow(task: Task, subTaskCounts: OpenDoneCounts? = null, onClick: ()
         Row(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 5.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
+            CompletionCheckbox(name = task.name, isDone = task.isDone, onToggle = onToggle)
             HttpLinkText(
                 text = task.name,
                 modifier = Modifier.weight(1f),
@@ -529,6 +540,7 @@ fun TaskRow(
     subTaskCounts: OpenDoneCounts? = null,
     showFinishedAt: Boolean = false,
     onClick: () -> Unit,
+    onToggle: () -> Unit,
     onLongPress: () -> Unit,
     onEdit: (() -> Unit)? = null,
     onDelete: (() -> Unit)? = null,
@@ -545,6 +557,7 @@ fun TaskRow(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.Top,
             ) {
+                CompletionCheckbox(name = task.name, isDone = task.isDone, onToggle = onToggle)
                 Column(modifier = Modifier.weight(1f)) {
                     HttpLinkText(
                         text = task.name,
@@ -575,12 +588,13 @@ fun TaskRow(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun SubTaskSimpleRow(subTask: SubTask, onClick: () -> Unit, onLongPress: () -> Unit) {
+fun SubTaskSimpleRow(subTask: SubTask, onClick: () -> Unit, onToggle: () -> Unit, onLongPress: () -> Unit) {
     SimpleNameRow(
         name = subTask.name,
         isDone = subTask.isDone,
         indicator = null,
         onClick = onClick,
+        onToggle = onToggle,
         onLongPress = onLongPress,
         linkify = true,
     )
@@ -591,6 +605,7 @@ fun SubTaskSimpleRow(subTask: SubTask, onClick: () -> Unit, onLongPress: () -> U
 fun SubTaskRow(
     subTask: SubTask,
     showFinishedAt: Boolean = false,
+    onToggle: () -> Unit,
     onLongPress: () -> Unit,
     onMoveUp: (() -> Unit)? = null,
     onMoveDown: (() -> Unit)? = null,
@@ -605,32 +620,39 @@ fun SubTaskRow(
             .padding(horizontal = 12.dp, vertical = 4.dp)
             .combinedClickable(onClick = {}, onLongClick = onLongPress),
     ) {
-        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
-            HttpLinkText(
-                text = subTask.name,
-                style = MaterialTheme.typography.titleMedium,
-                textDecoration = if (subTask.isDone) TextDecoration.LineThrough else TextDecoration.None,
-            )
-            if (subTask.description.isNotBlank()) {
-                HttpLinkText(subTask.description, style = MaterialTheme.typography.bodyMedium)
-            }
-            StatusText(
-                status = subTask.status,
-                finishedAt = subTask.finishedAt.takeIf { showFinishedAt },
-            )
-            if (onMoveUp != null || onMoveDown != null || onEdit != null || onDelete != null) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (onMoveUp != null) {
-                        CompactTextAction("Up", onMoveUp, enabled = canMoveUp)
-                    }
-                    if (onMoveDown != null) {
-                        CompactTextAction("Down", onMoveDown, enabled = canMoveDown)
-                    }
-                    if (onEdit != null) {
-                        CompactTextAction("Edit", onEdit)
-                    }
-                    if (onDelete != null) {
-                        CompactTextAction("Delete", onDelete)
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            CompletionCheckbox(name = subTask.name, isDone = subTask.isDone, onToggle = onToggle)
+            Column(modifier = Modifier.weight(1f)) {
+                HttpLinkText(
+                    text = subTask.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    textDecoration = if (subTask.isDone) TextDecoration.LineThrough else TextDecoration.None,
+                )
+                if (subTask.description.isNotBlank()) {
+                    HttpLinkText(subTask.description, style = MaterialTheme.typography.bodyMedium)
+                }
+                StatusText(
+                    status = subTask.status,
+                    finishedAt = subTask.finishedAt.takeIf { showFinishedAt },
+                )
+                if (onMoveUp != null || onMoveDown != null || onEdit != null || onDelete != null) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (onMoveUp != null) {
+                            CompactTextAction("Up", onMoveUp, enabled = canMoveUp)
+                        }
+                        if (onMoveDown != null) {
+                            CompactTextAction("Down", onMoveDown, enabled = canMoveDown)
+                        }
+                        if (onEdit != null) {
+                            CompactTextAction("Edit", onEdit)
+                        }
+                        if (onDelete != null) {
+                            CompactTextAction("Delete", onDelete)
+                        }
                     }
                 }
             }
@@ -645,6 +667,7 @@ private fun SimpleNameRow(
     isDone: Boolean,
     indicator: String?,
     onClick: () -> Unit,
+    onToggle: (() -> Unit)? = null,
     onLongPress: (() -> Unit)? = null,
     linkify: Boolean = false,
 ) {
@@ -662,7 +685,11 @@ private fun SimpleNameRow(
         Row(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 5.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (onToggle != null) {
+                CompletionCheckbox(name = name, isDone = isDone, onToggle = onToggle)
+            }
             val nameDecoration = if (isDone) TextDecoration.LineThrough else TextDecoration.None
             if (linkify) {
                 HttpLinkText(
@@ -692,6 +719,17 @@ private fun SimpleNameRow(
             thickness = 0.5.dp,
         )
     }
+}
+
+@Composable
+private fun CompletionCheckbox(name: String, isDone: Boolean, onToggle: () -> Unit) {
+    Checkbox(
+        checked = isDone,
+        onCheckedChange = { onToggle() },
+        modifier = Modifier.semantics {
+            contentDescription = if (isDone) "Mark $name incomplete" else "Mark $name complete"
+        },
+    )
 }
 
 @Composable

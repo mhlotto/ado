@@ -384,6 +384,7 @@ fun ProjectDetailScreen(
                                 task = task,
                                 subTaskCounts = subTaskCounts[task.id],
                                 onClick = { onOpenTask(task.id) },
+                                onToggle = { toggle(task) },
                                 onLongPress = { toggle(task) },
                             )
                         } else {
@@ -391,6 +392,7 @@ fun ProjectDetailScreen(
                                 task = task,
                                 subTaskCounts = subTaskCounts[task.id],
                                 onClick = { onOpenTask(task.id) },
+                                onToggle = { toggle(task) },
                                 onLongPress = { toggle(task) },
                                 onEdit = { openEditTask(task) },
                                 onDelete = { taskToDelete = task },
@@ -412,6 +414,7 @@ fun ProjectDetailScreen(
                                         task = task,
                                         subTaskCounts = subTaskCounts[task.id],
                                         onClick = { onOpenTask(task.id) },
+                                        onToggle = { toggle(task) },
                                         onLongPress = { toggle(task) },
                                     )
                                 } else {
@@ -420,6 +423,7 @@ fun ProjectDetailScreen(
                                         subTaskCounts = subTaskCounts[task.id],
                                         showFinishedAt = true,
                                         onClick = { onOpenTask(task.id) },
+                                        onToggle = { toggle(task) },
                                         onLongPress = { toggle(task) },
                                         onEdit = { openEditTask(task) },
                                         onDelete = { taskToDelete = task },

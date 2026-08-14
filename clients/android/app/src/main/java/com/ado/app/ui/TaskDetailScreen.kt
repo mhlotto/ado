@@ -328,11 +328,13 @@ fun TaskDetailScreen(
                             SubTaskSimpleRow(
                                 subTask = subTask,
                                 onClick = { toggleSubTask(subTask) },
+                                onToggle = { toggleSubTask(subTask) },
                                 onLongPress = { toggleSubTask(subTask) },
                             )
                         } else {
                             SubTaskRow(
                                 subTask = subTask,
+                                onToggle = { toggleSubTask(subTask) },
                                 onLongPress = { toggleSubTask(subTask) },
                                 onMoveUp = { moveSubTask(subTask, -1) },
                                 onMoveDown = { moveSubTask(subTask, 1) },
@@ -357,12 +359,14 @@ fun TaskDetailScreen(
                                     SubTaskSimpleRow(
                                         subTask = subTask,
                                         onClick = { toggleSubTask(subTask) },
+                                        onToggle = { toggleSubTask(subTask) },
                                         onLongPress = { toggleSubTask(subTask) },
                                     )
                                 } else {
                                     SubTaskRow(
                                         subTask = subTask,
                                         showFinishedAt = true,
+                                        onToggle = { toggleSubTask(subTask) },
                                         onLongPress = { toggleSubTask(subTask) },
                                         onEdit = { openEditSubTask(subTask) },
                                         onDelete = { subTaskToDelete = subTask },
