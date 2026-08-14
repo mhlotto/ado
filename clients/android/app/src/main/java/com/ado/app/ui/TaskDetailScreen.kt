@@ -235,18 +235,6 @@ fun TaskDetailScreen(
         }
     }
 
-    fun moveSubTask(subTask: SubTask, delta: Int) {
-        scope.launch {
-            error = null
-            message = null
-            try {
-                subtasks = repository.moveUnfinishedSubTask(taskId, subTask.id, delta)
-            } catch (e: Exception) {
-                error = repository.friendlyError(e)
-            }
-        }
-    }
-
     fun saveReorderedSubTasks(orderedIds: List<String>) {
         subtasks = reorderSubTasksById(subtasks, orderedIds)
         reorderSaving = true
@@ -306,7 +294,7 @@ fun TaskDetailScreen(
         title = task?.name ?: "Task",
         onBack = { if (reorderMode) leaveReorderMode() else onBack() },
         onSettings = if (reorderMode) null else onOpenSettings,
-        actions = if (!reorderMode && subtasks.isNotEmpty()) {
+        topBarActions = if (!reorderMode && subtasks.isNotEmpty()) {
             {
                 TextButton(onClick = { reorderMode = true }) {
                     Text("Reorder")
@@ -384,7 +372,6 @@ fun TaskDetailScreen(
                     val unfinishedSubTasks = subtasks.filterNot { it.isDone }
                     val finishedSubTasks = subtasks.filter { it.isDone }.sortedBy(::subTaskFinishedAt)
                     items(unfinishedSubTasks, key = { it.id }) { subTask ->
-                        val index = unfinishedSubTasks.indexOf(subTask)
                         if (simpleView) {
                             SubTaskSimpleRow(
                                 subTask = subTask,
@@ -397,10 +384,6 @@ fun TaskDetailScreen(
                                 subTask = subTask,
                                 onToggle = { toggleSubTask(subTask) },
                                 onLongPress = { toggleSubTask(subTask) },
-                                onMoveUp = { moveSubTask(subTask, -1) },
-                                onMoveDown = { moveSubTask(subTask, 1) },
-                                canMoveUp = index > 0,
-                                canMoveDown = index < unfinishedSubTasks.lastIndex,
                                 onEdit = { openEditSubTask(subTask) },
                                 onDelete = { subTaskToDelete = subTask },
                             )

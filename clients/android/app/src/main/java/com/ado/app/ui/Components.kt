@@ -84,13 +84,13 @@ data class BottomBarAction(
     val emphasized: Boolean = false,
 )
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AdoScaffold(
     title: String,
     onBack: (() -> Unit)? = null,
     onSettings: (() -> Unit)? = null,
-    actions: (@Composable () -> Unit)? = null,
+    topBarActions: (@Composable () -> Unit)? = null,
     bottomActions: List<BottomBarAction> = emptyList(),
     content: @Composable (Modifier) -> Unit,
 ) {
@@ -98,34 +98,24 @@ fun AdoScaffold(
 
     Scaffold(
         topBar = {
-            Column {
-                TopAppBar(
-                    title = {
-                        Text(
-                            text = title,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    },
-                    navigationIcon = {
-                        AppBarNavigationSlot(onBack = onBack)
-                    },
-                    actions = {
-                        if (onSettings != null) {
-                            TextButton(onClick = onSettings) { Text("Settings") }
-                        }
-                    },
-                )
-                if (actions != null) {
-                    FlowRow(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp),
-                    ) {
-                        actions()
+            TopAppBar(
+                title = {
+                    Text(
+                        text = title,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                navigationIcon = {
+                    AppBarNavigationSlot(onBack = onBack)
+                },
+                actions = {
+                    topBarActions?.invoke()
+                    if (onSettings != null) {
+                        TextButton(onClick = onSettings) { Text("Settings") }
                     }
-                }
-            }
+                },
+            )
         },
         bottomBar = {
             if (bottomActions.isNotEmpty()) {
@@ -627,10 +617,6 @@ fun SubTaskRow(
     showFinishedAt: Boolean = false,
     onToggle: () -> Unit,
     onLongPress: () -> Unit,
-    onMoveUp: (() -> Unit)? = null,
-    onMoveDown: (() -> Unit)? = null,
-    canMoveUp: Boolean = false,
-    canMoveDown: Boolean = false,
     onEdit: (() -> Unit)? = null,
     onDelete: (() -> Unit)? = null,
 ) {
@@ -656,14 +642,8 @@ fun SubTaskRow(
                     HttpLinkText(subTask.description, style = MaterialTheme.typography.bodyMedium)
                 }
                 FinishedAtMetadata(subTask.finishedAt.takeIf { showFinishedAt })
-                if (onMoveUp != null || onMoveDown != null || onEdit != null || onDelete != null) {
+                if (onEdit != null || onDelete != null) {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        if (onMoveUp != null) {
-                            CompactTextAction("Up", onMoveUp, enabled = canMoveUp)
-                        }
-                        if (onMoveDown != null) {
-                            CompactTextAction("Down", onMoveDown, enabled = canMoveDown)
-                        }
                         if (onEdit != null) {
                             CompactTextAction("Edit", onEdit)
                         }
