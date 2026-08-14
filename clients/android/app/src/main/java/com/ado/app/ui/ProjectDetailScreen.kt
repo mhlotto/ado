@@ -676,11 +676,7 @@ private fun ProjectHeader(
             )
             ListTypeSettingsButton(onClick = onConfigureListType)
         }
-        Text(
-            text = "list: ${listTypeLabel(project.listType)}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MutedTextColor,
-        )
+        SpecialListTypeLabel(project.listType)
         if (project.description.isNotBlank()) {
             Text(project.description, style = MaterialTheme.typography.bodyMedium, color = MutedTextColor)
         }

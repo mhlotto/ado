@@ -491,20 +491,10 @@ private fun TaskHeader(
             }
             ListTypeSettingsButton(onClick = onConfigureListType)
         }
-        Text(
-            text = "list: ${listTypeLabel(task.listType)}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MutedTextColor,
-        )
+        SpecialListTypeLabel(task.listType)
         if (task.description.isNotBlank()) {
             HttpLinkText(task.description, style = MaterialTheme.typography.bodyLarge)
         }
-        Row {
-            Text("Status: ${task.status}", color = MaterialTheme.colorScheme.primary)
-        }
-        Text("Created: ${task.createdAt}", style = MaterialTheme.typography.bodySmall, color = MutedTextColor)
-        if (task.finishedAt != null) {
-            Text("Finished: ${task.finishedAt}", style = MaterialTheme.typography.bodySmall, color = MutedTextColor)
-        }
+        FinishedAtMetadata(task.finishedAt)
     }
 }

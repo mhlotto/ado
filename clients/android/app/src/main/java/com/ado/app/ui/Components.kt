@@ -310,12 +310,22 @@ fun InfoBanner(message: String) {
 }
 
 @Composable
-fun StatusText(status: String, finishedAt: String? = null) {
-    val finishedLabel = finishedAt?.let(::formatFinishedAt)
+fun SpecialListTypeLabel(listType: String) {
+    if (listType == LIST_TYPE_NORMAL) return
     Text(
-        text = if (finishedLabel == null) status else "$status - $finishedLabel",
-        color = MaterialTheme.colorScheme.primary,
-        style = MaterialTheme.typography.labelMedium,
+        text = listTypeLabel(listType),
+        color = MutedTextColor,
+        style = MaterialTheme.typography.bodySmall,
+    )
+}
+
+@Composable
+fun FinishedAtMetadata(finishedAt: String?) {
+    val finishedLabel = finishedAt?.let(::formatFinishedAt) ?: return
+    Text(
+        text = "Completed $finishedLabel",
+        color = MutedTextColor,
+        style = MaterialTheme.typography.bodySmall,
     )
 }
 
@@ -574,12 +584,7 @@ fun TaskRow(
                     if (task.description.isNotBlank()) {
                         HttpLinkText(task.description, style = MaterialTheme.typography.bodyMedium)
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        StatusText(
-                            status = task.status,
-                            finishedAt = task.finishedAt.takeIf { showFinishedAt },
-                        )
-                    }
+                    FinishedAtMetadata(task.finishedAt.takeIf { showFinishedAt })
                 }
                 if (subTaskCounts != null && subTaskCounts.total > 0) {
                     OpenDoneStatTiles(
@@ -642,10 +647,7 @@ fun SubTaskRow(
                 if (subTask.description.isNotBlank()) {
                     HttpLinkText(subTask.description, style = MaterialTheme.typography.bodyMedium)
                 }
-                StatusText(
-                    status = subTask.status,
-                    finishedAt = subTask.finishedAt.takeIf { showFinishedAt },
-                )
+                FinishedAtMetadata(subTask.finishedAt.takeIf { showFinishedAt })
                 if (onMoveUp != null || onMoveDown != null || onEdit != null || onDelete != null) {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         if (onMoveUp != null) {
