@@ -29,6 +29,8 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.minimumInteractiveComponentSize
@@ -90,7 +92,6 @@ fun AdoScaffold(
     title: String,
     onBack: (() -> Unit)? = null,
     onSettings: (() -> Unit)? = null,
-    topBarActions: (@Composable () -> Unit)? = null,
     bottomActions: List<BottomBarAction> = emptyList(),
     content: @Composable (Modifier) -> Unit,
 ) {
@@ -110,7 +111,6 @@ fun AdoScaffold(
                     AppBarNavigationSlot(onBack = onBack)
                 },
                 actions = {
-                    topBarActions?.invoke()
                     if (onSettings != null) {
                         TextButton(onClick = onSettings) { Text("Settings") }
                     }
@@ -591,7 +591,30 @@ fun TaskRow(
                     )
                 }
             }
-            CompactRowActions(onEdit = onEdit, onDelete = onDelete)
+            if (onEdit != null || onDelete != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    if (onEdit != null) {
+                        IconButton(onClick = onEdit) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_edit_24),
+                                contentDescription = "Edit ${task.name}",
+                            )
+                        }
+                    }
+                    if (onDelete != null) {
+                        IconButton(onClick = onDelete) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_delete_24),
+                                contentDescription = "Delete ${task.name}",
+                                tint = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -642,15 +665,22 @@ fun SubTaskRow(
                     HttpLinkText(subTask.description, style = MaterialTheme.typography.bodyMedium)
                 }
                 FinishedAtMetadata(subTask.finishedAt.takeIf { showFinishedAt })
-                if (onEdit != null || onDelete != null) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        if (onEdit != null) {
-                            CompactTextAction("Edit", onEdit)
-                        }
-                        if (onDelete != null) {
-                            CompactTextAction("Delete", onDelete)
-                        }
-                    }
+            }
+            if (onEdit != null) {
+                IconButton(onClick = onEdit) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_edit_24),
+                        contentDescription = "Edit ${subTask.name}",
+                    )
+                }
+            }
+            if (onDelete != null) {
+                IconButton(onClick = onDelete) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_delete_24),
+                        contentDescription = "Delete ${subTask.name}",
+                        tint = MaterialTheme.colorScheme.error,
+                    )
                 }
             }
         }

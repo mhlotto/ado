@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -23,8 +25,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import com.ado.app.R
 import com.ado.app.data.AdoRepository
 import com.ado.app.data.Project
 import com.ado.app.data.SubTask
@@ -294,15 +298,6 @@ fun TaskDetailScreen(
         title = task?.name ?: "Task",
         onBack = { if (reorderMode) leaveReorderMode() else onBack() },
         onSettings = if (reorderMode) null else onOpenSettings,
-        topBarActions = if (!reorderMode && subtasks.isNotEmpty()) {
-            {
-                TextButton(onClick = { reorderMode = true }) {
-                    Text("Reorder")
-                }
-            }
-        } else {
-            null
-        },
         bottomActions = if (reorderMode) emptyList() else listOf(
             BottomBarAction(
                 label = "Edit",
@@ -371,6 +366,28 @@ fun TaskDetailScreen(
                 else -> LazyColumn {
                     val unfinishedSubTasks = subtasks.filterNot { it.isDone }
                     val finishedSubTasks = subtasks.filter { it.isDone }.sortedBy(::subTaskFinishedAt)
+                    item(key = "items-header") {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "Items",
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            if (subtasks.size >= 2) {
+                                IconButton(onClick = { reorderMode = true }) {
+                                    Icon(
+                                        painter = painterResource(R.drawable.ic_reorder_24),
+                                        contentDescription = "Reorder items",
+                                    )
+                                }
+                            }
+                        }
+                    }
                     items(unfinishedSubTasks, key = { it.id }) { subTask ->
                         if (simpleView) {
                             SubTaskSimpleRow(

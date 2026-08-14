@@ -2,6 +2,7 @@ package com.ado.app.ui
 
 import android.Manifest
 import android.content.pm.PackageManager
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -15,6 +16,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -29,14 +32,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.ado.app.R
 import com.ado.app.data.AdoRepository
 import com.ado.app.data.CalendarDailyItem
 import com.ado.app.data.CalendarEventReader
 import com.ado.app.data.Project
 import com.ado.app.data.Task
 import com.ado.app.data.Template
+import com.ado.app.data.reorderTasksById
 import java.time.Instant
 import kotlinx.coroutines.launch
 
@@ -67,6 +73,8 @@ fun ProjectDetailScreen(
     var pendingCalendarDailyGeneration by remember { mutableStateOf<PendingDailyGeneration?>(null) }
     var simpleView by remember { mutableStateOf(false) }
     var subTaskCounts by remember { mutableStateOf<Map<String, OpenDoneCounts>>(emptyMap()) }
+    var reorderMode by remember(projectId) { mutableStateOf(false) }
+    var reorderSaving by remember(projectId) { mutableStateOf(false) }
     val rollUpCompleted by repository.rollUpCompletedFlow.collectAsState(initial = true)
     val dataRevision by repository.dataRevisionFlow.collectAsState(initial = 0)
     var finishedExpanded by remember(projectId) { mutableStateOf(!rollUpCompleted) }
@@ -335,13 +343,36 @@ fun ProjectDetailScreen(
         }
     }
 
+    fun saveReorderedTasks(orderedIds: List<String>) {
+        tasks = reorderTasksById(tasks, orderedIds)
+        reorderSaving = true
+        scope.launch {
+            error = null
+            message = null
+            try {
+                tasks = repository.reorderTasks(projectId, orderedIds)
+            } catch (e: Exception) {
+                tasks = repository.getTasks(projectId).data
+                error = repository.friendlyError(e)
+            } finally {
+                reorderSaving = false
+            }
+        }
+    }
+
     LaunchedEffect(projectId, dataRevision) { refresh() }
+
+    fun leaveReorderMode() {
+        if (!reorderSaving) reorderMode = false
+    }
+
+    BackHandler(enabled = reorderMode) { leaveReorderMode() }
 
     AdoScaffold(
         title = project?.name ?: "Project",
-        onBack = onBack,
-        onSettings = onOpenSettings,
-        bottomActions = listOf(
+        onBack = { if (reorderMode) leaveReorderMode() else onBack() },
+        onSettings = if (reorderMode) null else onOpenSettings,
+        bottomActions = if (reorderMode) emptyList() else listOf(
             BottomBarAction(
                 label = "Add",
                 onClick = { openAddTask() },
@@ -365,19 +396,66 @@ fun ProjectDetailScreen(
             message?.let { InfoBanner(it) }
 
             project?.let {
-                ProjectHeader(
-                    project = it,
-                    onConfigureListType = { showListTypeDialog = true },
-                )
+                if (!reorderMode) {
+                    ProjectHeader(
+                        project = it,
+                        onConfigureListType = { showListTypeDialog = true },
+                    )
+                }
             }
 
             when {
                 loading && tasks.isEmpty() -> LoadingState()
                 tasks.isEmpty() -> EmptyState("No tasks for this project.")
+                reorderMode -> {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = if (reorderSaving) "Saving order..." else "Reorder tasks",
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        TextButton(onClick = ::leaveReorderMode, enabled = !reorderSaving) {
+                            Text("Done")
+                        }
+                    }
+                    ReorderTaskList(
+                        tasks = tasks,
+                        enabled = !reorderSaving,
+                        modifier = Modifier.weight(1f),
+                        onOrderSettled = ::saveReorderedTasks,
+                    )
+                }
                 else -> LazyColumn {
                     val displayTasks = sortedTasksForProject(project, tasks)
                     val unfinishedTasks = displayTasks.filterNot { it.isDone }
                     val finishedTasks = displayTasks.filter { it.isDone }.sortedBy(::taskFinishedAt)
+                    item(key = "tasks-header") {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "Tasks",
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            if (tasks.size >= 2 && project?.coreKey != "daily") {
+                                IconButton(onClick = { reorderMode = true }) {
+                                    Icon(
+                                        painter = painterResource(R.drawable.ic_reorder_24),
+                                        contentDescription = "Reorder tasks",
+                                    )
+                                }
+                            }
+                        }
+                    }
                     items(unfinishedTasks, key = { it.id }) { task ->
                         if (simpleView) {
                             TaskSimpleRow(

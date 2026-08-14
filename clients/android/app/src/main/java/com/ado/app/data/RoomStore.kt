@@ -91,6 +91,9 @@ interface AdoDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertTask(task: TaskEntity)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertTasks(tasks: List<TaskEntity>)
+
     @Query("DELETE FROM tasks WHERE id = :id")
     suspend fun deleteTask(id: String)
 
@@ -278,6 +281,10 @@ class RoomLocalStore(context: Context) : LocalStore {
 
     override suspend fun saveTask(task: Task) {
         dao.upsertTask(taskEntity(task))
+    }
+
+    override suspend fun saveTasks(tasks: List<Task>) {
+        dao.upsertTasks(tasks.map(::taskEntity))
     }
 
     override suspend fun deleteTask(task: Task) {

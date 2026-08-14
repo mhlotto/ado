@@ -9,6 +9,7 @@ interface LocalStore {
     suspend fun getTasks(projectId: String): List<Task>
     suspend fun getTask(taskId: String): Task?
     suspend fun saveTask(task: Task)
+    suspend fun saveTasks(tasks: List<Task>)
     suspend fun deleteTask(task: Task)
     suspend fun getSubTasks(taskId: String): List<SubTask>
     suspend fun getSubTask(subTaskId: String): SubTask?

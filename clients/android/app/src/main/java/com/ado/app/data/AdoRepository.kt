@@ -202,6 +202,20 @@ class AdoRepository(
         localStore.deleteTask(task)
     }
 
+    suspend fun reorderTasks(projectId: String, orderedIds: List<String>): List<Task> {
+        ensureInitialized()
+        val stored = orderedTasks(localStore.getTasks(projectId))
+        val reordered = reorderTasksById(stored, orderedIds)
+        val changed = stored.associateBy { it.id }.let { previous ->
+            reordered.filter { task -> previous.getValue(task.id).position != task.position }
+        }
+        if (changed.isNotEmpty()) {
+            val updatedAt = now()
+            localStore.saveTasks(changed.map { it.copy(updatedAt = updatedAt) })
+        }
+        return orderedTasks(localStore.getTasks(projectId))
+    }
+
     suspend fun getSubTasks(taskId: String): LoadResult<List<SubTask>> {
         ensureInitialized()
         return LoadResult(orderedSubTasks(localStore.getSubTasks(taskId)))
