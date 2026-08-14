@@ -285,6 +285,20 @@ class AdoRepository(
         return orderedSubTasks(localStore.getSubTasks(taskId))
     }
 
+    suspend fun reorderSubTasks(taskId: String, orderedIds: List<String>): List<SubTask> {
+        ensureInitialized()
+        val stored = orderedSubTasks(localStore.getSubTasks(taskId))
+        val reordered = reorderSubTasksById(stored, orderedIds)
+        val changed = stored.associateBy { it.id }.let { previous ->
+            reordered.filter { subTask -> previous.getValue(subTask.id).position != subTask.position }
+        }
+        if (changed.isNotEmpty()) {
+            val updatedAt = now()
+            localStore.saveSubTasks(changed.map { it.copy(updatedAt = updatedAt) })
+        }
+        return orderedSubTasks(localStore.getSubTasks(taskId))
+    }
+
     suspend fun generateDailyToday(carryOver: Boolean = false) {
         generateDaily("today", carryOver)
     }

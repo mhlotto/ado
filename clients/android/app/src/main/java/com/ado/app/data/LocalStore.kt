@@ -13,6 +13,7 @@ interface LocalStore {
     suspend fun getSubTasks(taskId: String): List<SubTask>
     suspend fun getSubTask(subTaskId: String): SubTask?
     suspend fun saveSubTask(subTask: SubTask)
+    suspend fun saveSubTasks(subTasks: List<SubTask>)
     suspend fun deleteSubTask(subTask: SubTask)
     suspend fun getTemplates(): List<Template>
     suspend fun getTemplate(templateKey: String): Template?

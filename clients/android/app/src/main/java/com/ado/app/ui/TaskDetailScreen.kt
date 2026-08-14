@@ -1,5 +1,6 @@
 package com.ado.app.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Column
@@ -29,6 +30,7 @@ import com.ado.app.data.Project
 import com.ado.app.data.SubTask
 import com.ado.app.data.Task
 import com.ado.app.data.Template
+import com.ado.app.data.reorderSubTasksById
 import java.time.Instant
 import kotlinx.coroutines.launch
 
@@ -55,6 +57,8 @@ fun TaskDetailScreen(
     var templates by remember { mutableStateOf<List<Template>>(emptyList()) }
     var showListTypeDialog by remember { mutableStateOf(false) }
     var simpleView by remember { mutableStateOf(false) }
+    var reorderMode by remember(taskId) { mutableStateOf(false) }
+    var reorderSaving by remember(taskId) { mutableStateOf(false) }
     val rollUpCompleted by repository.rollUpCompletedFlow.collectAsState(initial = true)
     val dataRevision by repository.dataRevisionFlow.collectAsState(initial = 0)
     var finishedExpanded by remember(taskId) { mutableStateOf(!rollUpCompleted) }
@@ -243,6 +247,23 @@ fun TaskDetailScreen(
         }
     }
 
+    fun saveReorderedSubTasks(orderedIds: List<String>) {
+        subtasks = reorderSubTasksById(subtasks, orderedIds)
+        reorderSaving = true
+        scope.launch {
+            error = null
+            message = null
+            try {
+                subtasks = repository.reorderSubTasks(taskId, orderedIds)
+            } catch (e: Exception) {
+                subtasks = repository.getSubTasks(taskId).data
+                error = repository.friendlyError(e)
+            } finally {
+                reorderSaving = false
+            }
+        }
+    }
+
     fun applyTemplate(template: Template) {
         scope.launch {
             error = null
@@ -275,11 +296,26 @@ fun TaskDetailScreen(
 
     LaunchedEffect(taskId, dataRevision) { refresh() }
 
+    fun leaveReorderMode() {
+        if (!reorderSaving) reorderMode = false
+    }
+
+    BackHandler(enabled = reorderMode) { leaveReorderMode() }
+
     AdoScaffold(
         title = task?.name ?: "Task",
-        onBack = onBack,
-        onSettings = onOpenSettings,
-        bottomActions = listOf(
+        onBack = { if (reorderMode) leaveReorderMode() else onBack() },
+        onSettings = if (reorderMode) null else onOpenSettings,
+        actions = if (!reorderMode && subtasks.isNotEmpty()) {
+            {
+                TextButton(onClick = { reorderMode = true }) {
+                    Text("Reorder")
+                }
+            }
+        } else {
+            null
+        },
+        bottomActions = if (reorderMode) emptyList() else listOf(
             BottomBarAction(
                 label = "Edit",
                 onClick = { openEditTask() },
@@ -308,17 +344,42 @@ fun TaskDetailScreen(
             message?.let { InfoBanner(it) }
 
             task?.let {
-                TaskHeader(
-                    task = it,
-                    onLongPress = ::toggleTask,
-                    onShare = ::shareCurrentTask,
-                    onConfigureListType = { showListTypeDialog = true },
-                )
+                if (!reorderMode) {
+                    TaskHeader(
+                        task = it,
+                        onLongPress = ::toggleTask,
+                        onShare = ::shareCurrentTask,
+                        onConfigureListType = { showListTypeDialog = true },
+                    )
+                }
             }
 
             when {
                 loading && subtasks.isEmpty() -> LoadingState()
                 subtasks.isEmpty() -> EmptyState("No subtasks.")
+                reorderMode -> {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = if (reorderSaving) "Saving order..." else "Reorder items",
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        TextButton(onClick = ::leaveReorderMode, enabled = !reorderSaving) {
+                            Text("Done")
+                        }
+                    }
+                    ReorderSubTaskList(
+                        subTasks = subtasks,
+                        enabled = !reorderSaving,
+                        modifier = Modifier.weight(1f),
+                        onOrderSettled = ::saveReorderedSubTasks,
+                    )
+                }
                 else -> LazyColumn {
                     val unfinishedSubTasks = subtasks.filterNot { it.isDone }
                     val finishedSubTasks = subtasks.filter { it.isDone }.sortedBy(::subTaskFinishedAt)
