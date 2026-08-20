@@ -538,13 +538,21 @@ fun ProjectRow(project: Project, onClick: () -> Unit, onEdit: (() -> Unit)? = nu
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(project.name, style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            text = project.name,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
                         if (project.isCore) {
                             Text("Core", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
                         }
                     }
                     if (project.description.isNotBlank()) {
-                        Text(project.description, style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            text = project.description,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                     if (project.tags.isNotEmpty()) {
                         Text(
@@ -587,7 +595,7 @@ fun TaskSimpleRow(
             HttpLinkText(
                 text = task.name,
                 modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
                 textDecoration = if (task.isDone) TextDecoration.LineThrough else TextDecoration.None,
             )
         }
@@ -639,11 +647,16 @@ fun TaskRow(
                 Column(modifier = Modifier.weight(1f)) {
                     HttpLinkText(
                         text = task.name,
-                        style = MaterialTheme.typography.titleMedium,
+                        style = MaterialTheme.typography.titleMedium.copy(color = MaterialTheme.colorScheme.onSurface),
                         textDecoration = if (task.isDone) TextDecoration.LineThrough else TextDecoration.None,
                     )
                     if (task.description.isNotBlank()) {
-                        HttpLinkText(task.description, style = MaterialTheme.typography.bodyMedium)
+                        HttpLinkText(
+                            text = task.description,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            ),
+                        )
                     }
                     FinishedAtMetadata(task.finishedAt.takeIf { showFinishedAt })
                 }
@@ -721,11 +734,16 @@ fun SubTaskRow(
             Column(modifier = Modifier.weight(1f)) {
                 HttpLinkText(
                     text = subTask.name,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleMedium.copy(color = MaterialTheme.colorScheme.onSurface),
                     textDecoration = if (subTask.isDone) TextDecoration.LineThrough else TextDecoration.None,
                 )
                 if (subTask.description.isNotBlank()) {
-                    HttpLinkText(subTask.description, style = MaterialTheme.typography.bodyMedium)
+                    HttpLinkText(
+                        text = subTask.description,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
+                    )
                 }
                 FinishedAtMetadata(subTask.finishedAt.takeIf { showFinishedAt })
             }
@@ -785,7 +803,7 @@ private fun SimpleNameRow(
                 HttpLinkText(
                     text = name,
                     modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.bodyLarge,
+                    style = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
                     textDecoration = nameDecoration,
                 )
             } else {
@@ -793,6 +811,7 @@ private fun SimpleNameRow(
                     text = name,
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
                     textDecoration = nameDecoration,
                 )
             }
