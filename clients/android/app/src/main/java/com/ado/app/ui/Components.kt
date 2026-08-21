@@ -88,7 +88,7 @@ data class BottomBarAction(
     val enabled: Boolean = true,
     val prominent: Boolean = false,
     val emphasized: Boolean = false,
-    val longPressMenu: List<BottomBarMenuAction> = emptyList(),
+    val menuActions: List<BottomBarMenuAction> = emptyList(),
 )
 
 data class BottomBarMenuAction(
@@ -213,7 +213,7 @@ private fun BottomActionControl(action: BottomBarAction) {
     var menuExpanded by remember(action.label) { mutableStateOf(false) }
 
     Box {
-        if (action.prominent && action.longPressMenu.isNotEmpty()) {
+        if (action.prominent && action.menuActions.isNotEmpty()) {
             val containerColor = if (action.enabled) {
                 MaterialTheme.colorScheme.primary
             } else {
@@ -231,9 +231,10 @@ private fun BottomActionControl(action: BottomBarAction) {
                     .combinedClickable(
                         enabled = action.enabled,
                         role = Role.Button,
-                        onClick = action.onClick,
-                        onLongClickLabel = "More add options",
-                        onLongClick = { menuExpanded = true },
+                        onClick = { menuExpanded = true },
+                        onLongClick = {
+                            // Consume the hold so releasing it cannot become a delayed tap.
+                        },
                     ),
                 shape = RoundedCornerShape(20.dp),
                 color = containerColor,
@@ -263,7 +264,7 @@ private fun BottomActionControl(action: BottomBarAction) {
             expanded = menuExpanded,
             onDismissRequest = { menuExpanded = false },
         ) {
-            action.longPressMenu.forEach { menuAction ->
+            action.menuActions.forEach { menuAction ->
                 DropdownMenuItem(
                     text = { Text(menuAction.label) },
                     onClick = {

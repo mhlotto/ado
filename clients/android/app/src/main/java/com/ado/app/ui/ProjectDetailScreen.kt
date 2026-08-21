@@ -379,7 +379,7 @@ fun ProjectDetailScreen(
                 label = "Add",
                 onClick = { openAddTask() },
                 prominent = true,
-                longPressMenu = listOf(
+                menuActions = listOf(
                     BottomBarMenuAction("Single") { openAddTask() },
                     BottomBarMenuAction("Bulk") { showBulkTaskDialog = true },
                     BottomBarMenuAction("Template") { openTemplateTask() },

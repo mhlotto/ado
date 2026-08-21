@@ -96,7 +96,7 @@ fun ProjectListScreen(
                 label = "Add",
                 onClick = { showCreateDialog = true },
                 prominent = true,
-                longPressMenu = listOf(
+                menuActions = listOf(
                     BottomBarMenuAction("Single") { showCreateDialog = true },
                 ),
             ),

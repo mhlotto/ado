@@ -310,7 +310,7 @@ fun TaskDetailScreen(
                 label = "Add",
                 onClick = { openAddSubTask() },
                 prominent = true,
-                longPressMenu = listOf(
+                menuActions = listOf(
                     BottomBarMenuAction("Single") { openAddSubTask() },
                     BottomBarMenuAction("Bulk") { showBulkSubTaskDialog = true },
                     BottomBarMenuAction("Template") { openTemplateSubTask() },

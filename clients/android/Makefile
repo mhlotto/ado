@@ -21,7 +21,19 @@ endif
 
 GRADLE_ENV := JAVA_HOME="$(JAVA_HOME)" $(if $(ANDROID_HOME),ANDROID_HOME="$(ANDROID_HOME)",)
 
-.PHONY: build clean install install-device doctor check-java
+.PHONY: help build clean install install-device doctor check-java
+
+help:
+	@printf '%s\n' \
+		'Android build targets:' \
+		'  make build          Build the debug APK.' \
+		'  make clean          Remove Gradle build outputs.' \
+		'  make doctor         Print the resolved JDK, Gradle, and Android SDK versions.' \
+		'  make install        Build and install the debug APK on a connected device.' \
+		'  make install-device Build and install the debug APK on a connected device.' \
+		'  make help           Show this help.' \
+		'' \
+		'Overrides: JAVA_HOME, ANDROID_HOME, and ADB.'
 
 check-java:
 	@if [ -z "$(JAVA_HOME)" ] || [ ! -x "$(JAVA_HOME)/bin/java" ]; then \
