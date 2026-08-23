@@ -1,9 +1,5 @@
 package com.ado.app.ui
 
-import android.content.ActivityNotFoundException
-import android.content.Intent
-import android.net.Uri
-import android.widget.Toast
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -70,11 +66,7 @@ fun HttpLinkText(
     val interactionListener = remember(context) {
         LinkInteractionListener { link ->
             val url = (link as? LinkAnnotation.Url)?.url ?: return@LinkInteractionListener
-            try {
-                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-            } catch (_: ActivityNotFoundException) {
-                Toast.makeText(context, "No app can open this link", Toast.LENGTH_SHORT).show()
-            }
+            openExternalHttpUrl(context, url)
         }
     }
     val annotatedText = buildAnnotatedString {

@@ -64,7 +64,15 @@ fun AppNav(repository: AdoRepository) {
                 repository = repository,
                 onBack = { navController.popBackStack() },
                 onOpenTemplates = { navController.navigate("templates") },
+                onOpenAbout = { navController.navigate("about") },
+                onOpenPrivacyPolicy = { navController.navigate("privacy-policy") },
             )
+        }
+        composable("about") {
+            AboutScreen(onBack = { navController.popBackStack() })
+        }
+        composable("privacy-policy") {
+            PrivacyPolicyScreen(onBack = { navController.popBackStack() })
         }
         composable("templates") {
             TemplateListScreen(

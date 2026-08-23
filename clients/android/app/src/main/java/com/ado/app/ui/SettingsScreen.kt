@@ -10,6 +10,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
@@ -37,6 +40,8 @@ fun SettingsScreen(
     repository: AdoRepository,
     onBack: () -> Unit,
     onOpenTemplates: () -> Unit,
+    onOpenAbout: () -> Unit,
+    onOpenPrivacyPolicy: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -108,6 +113,7 @@ fun SettingsScreen(
     ) { padding ->
         Column(
             modifier = padding
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp)
                 .fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(18.dp),
@@ -163,6 +169,12 @@ fun SettingsScreen(
                 }
             }
 
+            Column {
+                Text("About & Privacy", style = MaterialTheme.typography.titleMedium)
+                SettingsNavigationRow(label = "About Ado", onClick = onOpenAbout)
+                SettingsNavigationRow(label = "Privacy Policy", onClick = onOpenPrivacyPolicy)
+            }
+
             message?.let { Text(text = it, style = MaterialTheme.typography.bodyMedium) }
         }
     }
@@ -182,5 +194,20 @@ fun SettingsScreen(
             onDismiss = { applyImport(raw, overwrite = false) },
             onConfirm = { applyImport(raw, overwrite = true) },
         )
+    }
+}
+
+@Composable
+private fun SettingsNavigationRow(label: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 14.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyLarge)
+        Text("›", style = MaterialTheme.typography.titleLarge, color = MutedTextColor)
     }
 }
