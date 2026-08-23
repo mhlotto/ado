@@ -12,6 +12,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import com.ado.app.R
 import com.ado.app.data.AdoRepository
 import com.ado.app.data.Project
 import kotlinx.coroutines.launch
@@ -96,6 +97,8 @@ fun ProjectListScreen(
                 label = "Add",
                 onClick = { showCreateDialog = true },
                 prominent = true,
+                iconResource = R.drawable.ic_add_24,
+                contentDescription = "Add",
                 menuActions = listOf(
                     BottomBarMenuAction("Single") { showCreateDialog = true },
                 ),
@@ -103,6 +106,8 @@ fun ProjectListScreen(
             BottomBarAction(
                 label = if (simpleView) "Full" else "Simple",
                 onClick = { simpleView = !simpleView },
+                iconResource = R.drawable.ic_view_mode_24,
+                contentDescription = if (simpleView) "Switch to full view" else "Switch to simple view",
             ),
         ),
     ) { padding ->

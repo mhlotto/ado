@@ -29,6 +29,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.ado.app.R
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -379,6 +380,8 @@ fun ProjectDetailScreen(
                 label = "Add",
                 onClick = { openAddTask() },
                 prominent = true,
+                iconResource = R.drawable.ic_add_24,
+                contentDescription = "Add",
                 menuActions = listOf(
                     BottomBarMenuAction("Single") { openAddTask() },
                     BottomBarMenuAction("Bulk") { showBulkTaskDialog = true },
@@ -389,6 +392,8 @@ fun ProjectDetailScreen(
                 BottomBarAction(
                     label = "Reorder",
                     onClick = { reorderMode = true },
+                    iconResource = R.drawable.ic_reorder_24,
+                    contentDescription = "Reorder tasks",
                 )
             } else {
                 null
@@ -396,11 +401,15 @@ fun ProjectDetailScreen(
             BottomBarAction(
                 label = if (simpleView) "Full" else "Simple",
                 onClick = { simpleView = !simpleView },
+                iconResource = R.drawable.ic_view_mode_24,
+                contentDescription = if (simpleView) "Switch to full view" else "Switch to simple view",
             ),
             BottomBarAction(
                 label = "Print",
                 onClick = { showPrintTaskSelection = true },
                 enabled = project != null && tasks.any { !it.isDone },
+                iconResource = R.drawable.ic_print_24,
+                contentDescription = "Print",
             ),
         ).filterNotNull(),
     ) { padding ->
@@ -752,9 +761,24 @@ private fun projectQuickAddActions(
         )
         else -> emptyList()
     }
-    return generatedActions + templates.map { template ->
+    return generatedActions + templatesForProjectQuickAdd(project?.coreKey, templates).map { template ->
         QuickAddAction("From template: ${template.name}") { onCreateFromTemplate(template) }
     }
+}
+
+internal fun templatesForProjectQuickAdd(coreKey: String?, templates: List<Template>): List<Template> {
+    val supersededTemplateKeys = when (coreKey) {
+        "daily" -> setOf("daily")
+        "home" -> setOf(
+            "summer_chores",
+            "fall_chores",
+            "winter_chores",
+            "spring_chores",
+            "leaving_house",
+        )
+        else -> emptySet()
+    }
+    return templates.filterNot { it.templateKey in supersededTemplateKeys }
 }
 
 @Composable

@@ -22,6 +22,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.ado.app.R
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
@@ -305,11 +306,15 @@ fun TaskDetailScreen(
                 label = "Edit",
                 onClick = { openEditTask() },
                 enabled = task != null,
+                iconResource = R.drawable.ic_edit_24,
+                contentDescription = "Edit task",
             ),
             BottomBarAction(
                 label = "Add",
                 onClick = { openAddSubTask() },
                 prominent = true,
+                iconResource = R.drawable.ic_add_24,
+                contentDescription = "Add",
                 menuActions = listOf(
                     BottomBarMenuAction("Single") { openAddSubTask() },
                     BottomBarMenuAction("Bulk") { showBulkSubTaskDialog = true },
@@ -320,6 +325,8 @@ fun TaskDetailScreen(
                 BottomBarAction(
                     label = "Reorder",
                     onClick = { reorderMode = true },
+                    iconResource = R.drawable.ic_reorder_24,
+                    contentDescription = "Reorder items",
                 )
             } else {
                 null
@@ -327,11 +334,15 @@ fun TaskDetailScreen(
             BottomBarAction(
                 label = if (simpleView) "Full" else "Simple",
                 onClick = { simpleView = !simpleView },
+                iconResource = R.drawable.ic_view_mode_24,
+                contentDescription = if (simpleView) "Switch to full view" else "Switch to simple view",
             ),
             BottomBarAction(
                 label = "Print",
                 onClick = ::printSubTasks,
                 enabled = task != null && subtasks.any { !it.isDone },
+                iconResource = R.drawable.ic_print_24,
+                contentDescription = "Print",
             ),
         ).filterNotNull(),
     ) { padding ->

@@ -38,7 +38,6 @@ import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -49,7 +48,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.input.pointer.pointerInput
@@ -88,6 +86,8 @@ data class BottomBarAction(
     val enabled: Boolean = true,
     val prominent: Boolean = false,
     val emphasized: Boolean = false,
+    val iconResource: Int? = null,
+    val contentDescription: String = label,
     val menuActions: List<BottomBarMenuAction> = emptyList(),
 )
 
@@ -179,7 +179,6 @@ private fun Modifier.swipeLeftToBack(
     )
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun BottomFloatingActionBar(
     actions: List<BottomBarAction>,
@@ -194,10 +193,10 @@ fun BottomFloatingActionBar(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
             elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
         ) {
-            FlowRow(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+            Row(
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 actions.forEach { action ->
                     BottomActionControl(action)
@@ -213,21 +212,10 @@ private fun BottomActionControl(action: BottomBarAction) {
     var menuExpanded by remember(action.label) { mutableStateOf(false) }
 
     Box {
-        if (action.prominent && action.menuActions.isNotEmpty()) {
-            val containerColor = if (action.enabled) {
-                MaterialTheme.colorScheme.primary
-            } else {
-                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
-            }
-            val contentColor = if (action.enabled) {
-                MaterialTheme.colorScheme.onPrimary
-            } else {
-                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-            }
-            Surface(
+        if (action.iconResource != null && action.menuActions.isNotEmpty()) {
+            Box(
                 modifier = Modifier
-                    .minimumInteractiveComponentSize()
-                    .clip(RoundedCornerShape(20.dp))
+                    .size(48.dp)
                     .combinedClickable(
                         enabled = action.enabled,
                         role = Role.Button,
@@ -236,16 +224,24 @@ private fun BottomActionControl(action: BottomBarAction) {
                             // Consume the hold so releasing it cannot become a delayed tap.
                         },
                     ),
-                shape = RoundedCornerShape(20.dp),
-                color = containerColor,
-                contentColor = contentColor,
+                contentAlignment = Alignment.Center,
             ) {
-                Box(
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 10.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(action.label, style = MaterialTheme.typography.labelLarge)
-                }
+                Icon(
+                    painter = painterResource(action.iconResource),
+                    contentDescription = action.contentDescription,
+                    tint = if (action.enabled) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                    },
+                )
+            }
+        } else if (action.iconResource != null) {
+            IconButton(onClick = action.onClick, enabled = action.enabled) {
+                Icon(
+                    painter = painterResource(action.iconResource),
+                    contentDescription = action.contentDescription,
+                )
             }
         } else if (action.prominent) {
             Button(onClick = action.onClick, enabled = action.enabled) {

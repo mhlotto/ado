@@ -21,6 +21,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.ado.app.R
 import androidx.compose.ui.unit.dp
 import com.ado.app.data.AdoRepository
 import com.ado.app.data.Template
@@ -128,6 +129,8 @@ fun TemplateDetailScreen(
                 onClick = { showAddDialog = true },
                 enabled = template != null,
                 prominent = true,
+                iconResource = R.drawable.ic_add_24,
+                contentDescription = "Add",
             ),
         ),
     ) { padding ->
