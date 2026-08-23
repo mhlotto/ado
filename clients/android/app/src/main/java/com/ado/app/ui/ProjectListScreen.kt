@@ -145,6 +145,7 @@ fun ProjectListScreen(
             title = "New project",
             nameLabel = "Project name",
             includeTags = true,
+            autoFocusName = true,
             onDismiss = { showCreateDialog = false },
             onSubmit = ::createProject,
         )

@@ -463,6 +463,7 @@ fun TaskDetailScreen(
         EntityFormDialog(
             title = "New subtask",
             nameLabel = "Subtask name",
+            autoFocusName = true,
             onDismiss = { showCreateSubTaskDialog = false },
             onSubmit = { name, description, _ -> createSubTask(name, description, emptyList()) },
         )

@@ -535,6 +535,7 @@ fun ProjectDetailScreen(
         EntityFormDialog(
             title = "New task",
             nameLabel = "Task name",
+            autoFocusName = true,
             onDismiss = { showCreateTaskDialog = false },
             onSubmit = { name, description, _ -> createTask(name, description, emptyList()) },
         )

@@ -42,16 +42,22 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.Role
@@ -962,12 +968,25 @@ fun EntityFormDialog(
     initialName: String = "",
     initialDescription: String = "",
     initialTags: List<String> = emptyList(),
+    autoFocusName: Boolean = false,
     onDismiss: () -> Unit,
     onSubmit: (name: String, description: String, tags: List<String>) -> Unit,
 ) {
     var name by remember(title, initialName) { mutableStateOf(initialName) }
     var description by remember(title, initialDescription) { mutableStateOf(initialDescription) }
     var tags by remember(title, initialTags) { mutableStateOf(initialTags.joinToString(", ")) }
+    val nameFocusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    var initialFocusRequested by rememberSaveable(title) { mutableStateOf(false) }
+
+    LaunchedEffect(autoFocusName, initialFocusRequested) {
+        if (autoFocusName && !initialFocusRequested) {
+            withFrameNanos { }
+            nameFocusRequester.requestFocus()
+            keyboardController?.show()
+            initialFocusRequested = true
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -979,6 +998,7 @@ fun EntityFormDialog(
                     onValueChange = { name = it },
                     label = { Text(nameLabel) },
                     singleLine = true,
+                    modifier = Modifier.focusRequester(nameFocusRequester),
                 )
                 OutlinedTextField(
                     value = description,
