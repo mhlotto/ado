@@ -32,7 +32,6 @@ import com.ado.app.data.SubTask
 import com.ado.app.data.Task
 import com.ado.app.data.Template
 import com.ado.app.data.reorderSubTasksById
-import java.time.Instant
 import kotlinx.coroutines.launch
 
 @Composable
@@ -391,7 +390,7 @@ fun TaskDetailScreen(
                 }
                 else -> LazyColumn {
                     val unfinishedSubTasks = subtasks.filterNot { it.isDone }
-                    val finishedSubTasks = subtasks.filter { it.isDone }.sortedBy(::subTaskFinishedAt)
+                    val finishedSubTasks = newestFinishedFirst(subtasks.filter { it.isDone }) { it.finishedAt }
                     item(key = "items-header") {
                         Row(
                             modifier = Modifier
@@ -544,17 +543,8 @@ fun TaskDetailScreen(
 
 }
 
-private fun subTaskFinishedAt(subTask: SubTask): Instant {
-    val finishedAt = subTask.finishedAt ?: return Instant.MAX
-    return try {
-        Instant.parse(finishedAt)
-    } catch (_: Exception) {
-        Instant.MAX
-    }
-}
-
 private fun subtasksInPrintOrder(subtasks: List<SubTask>): List<SubTask> =
-    subtasks.filterNot { it.isDone } + subtasks.filter { it.isDone }.sortedBy(::subTaskFinishedAt)
+    subtasks.filterNot { it.isDone } + newestFinishedFirst(subtasks.filter { it.isDone }) { it.finishedAt }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable

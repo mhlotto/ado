@@ -457,7 +457,7 @@ fun ProjectDetailScreen(
                 else -> LazyColumn {
                     val displayTasks = sortedTasksForProject(project, tasks)
                     val unfinishedTasks = displayTasks.filterNot { it.isDone }
-                    val finishedTasks = displayTasks.filter { it.isDone }.sortedBy(::taskFinishedAt)
+                    val finishedTasks = newestFinishedFirst(displayTasks.filter { it.isDone }) { it.finishedAt }
                     item(key = "tasks-header") {
                         Row(
                             modifier = Modifier
@@ -711,19 +711,11 @@ private fun sortedTasksForProject(project: Project?, tasks: List<Task>): List<Ta
 
 private fun tasksInChecklistOrder(project: Project?, tasks: List<Task>): List<Task> {
     val sorted = sortedTasksForProject(project, tasks)
-    return sorted.filterNot { it.isDone } + sorted.filter { it.isDone }.sortedBy(::taskFinishedAt)
+    return sorted.filterNot { it.isDone } + newestFinishedFirst(sorted.filter { it.isDone }) { it.finishedAt }
 }
 
 private fun subTasksInChecklistOrder(subTasks: List<com.ado.app.data.SubTask>): List<com.ado.app.data.SubTask> =
-    subTasks.filterNot { it.isDone } + subTasks.filter { it.isDone }.sortedBy {
-        it.finishedAt?.let { finishedAt ->
-            try {
-                Instant.parse(finishedAt)
-            } catch (_: Exception) {
-                Instant.MAX
-            }
-        } ?: Instant.MAX
-    }
+    subTasks.filterNot { it.isDone } + newestFinishedFirst(subTasks.filter { it.isDone }) { it.finishedAt }
 
 private fun taskCreatedAt(task: Task): Instant =
     try {
@@ -731,15 +723,6 @@ private fun taskCreatedAt(task: Task): Instant =
     } catch (_: Exception) {
         Instant.EPOCH
     }
-
-private fun taskFinishedAt(task: Task): Instant {
-    val finishedAt = task.finishedAt ?: return Instant.MAX
-    return try {
-        Instant.parse(finishedAt)
-    } catch (_: Exception) {
-        Instant.MAX
-    }
-}
 
 private fun projectQuickAddActions(
     project: Project?,
