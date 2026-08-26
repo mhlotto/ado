@@ -1,144 +1,67 @@
-# ado
+# Ado
 
-`ado` is a task-list application for daily and longer-term task tracking. The Android client is now the standalone primary application; the server and static web client remain in the tree as retained implementations.
+<img src="ado-icon.png" alt="Ado app icon" width="140">
 
-<img src="clients/android/app/src/main/res/drawable-nodpi/ado_splash.png" alt="ado Android splash screen" width="360">
+Ado is a simple, local-first Android app for projects, tasks, checklists, daily lists, and the everyday things you need to remember.
 
-## Layout
+It is designed to stay practical: capture items quickly, organize them when needed, mark them finished, and keep the data on your device.
 
-```text
-server/             Go REST API, PostgreSQL migrations, scripts, tests
-clients/android/    Kotlin/Jetpack Compose Android client
-clients/web-local/  Plain static HTML/CSS/JS local browser client
-```
+## Features
 
-## Retained Server
+- Projects, tasks, and subtasks
+- Simple and full list views
+- Completion controls and finished-item history
+- Drag-and-drop reordering
+- Single, bulk, and template-based creation
+- Daily, seasonal, market, and other reusable lists
+- Optional calendar import for daily lists
+- Task sharing and checklist printing
+- Local Room storage
+- Versioned JSON backup and restore
+- Clickable HTTP and HTTPS links
 
-For the retained server-backed `web-local` client, the server is the canonical API and persistence layer. It provides:
+Ado does not require an account or a server. Its working data is stored locally and only leaves the app when you explicitly export, print, or share it.
 
-- Project, task, and subtask CRUD
-- Core `Daily` and `Home` projects
-- Editable templates for daily and home chore defaults
-- Daily, seasonal, and Home checklist task generation
-- PostgreSQL migrations and seed data
-- API and PostgreSQL integration tests
-- Development CORS support for local clients
-
-Quick start:
-
-```sh
-cd server
-make db-init
-make run-server
-```
-
-Default server port:
+## Repository layout
 
 ```text
-8989
+app/          Android application
+app-website/  Static Ado website and privacy policy
 ```
 
-Server setup, database scripts, tests, and API examples are in [server/README.md](server/README.md).
+The Android app is built with Kotlin, Jetpack Compose, Material 3, and Room. The website is plain HTML and CSS with no build step.
 
-## Public Configuration
+## Build the Android app
 
-This repository does not embed a private LAN server address. Configure the client that you use:
+Requirements:
 
-- `clients/web-local/` defaults to `http://localhost:8989`; change its API server URL in the browser settings panel and it is stored in `localStorage`.
-- `clients/android/` is standalone and does not contain or require an API server URL. Its data lives on the device and can be exported/imported from Settings.
-
-If `web-local` is served from a LAN hostname/origin rather than opened directly or served from `localhost`, allow that origin when starting the server:
+- JDK 17
+- Android SDK
 
 ```sh
-cd server
-ADO_CORS_ORIGINS=http://web-host.example:5173 make run-server
-```
-
-Seeded server templates are generic starter content in the public repository and can be edited through `web-local` or the API after database initialization. Android maintains its own local templates.
-
-The `ado` / `ado` PostgreSQL credential in local development configuration is deliberately a disposable development default. Replace it and provide a corresponding `DATABASE_URL` for any non-local deployment.
-
-## Clients
-
-`clients/android/` is standalone. `clients/web-local/` remains a server-backed browser client and lets you set its API URL locally.
-
-### Android
-
-Path:
-
-```text
-clients/android/
-```
-
-The Android client is built with Kotlin and Jetpack Compose. It includes:
-
-- Project, task, and subtask browsing
-- Create/edit/delete for projects, tasks, and subtasks
-- Bulk-create tasks and subtasks from pasted text
-- Task/subtask done/todo toggles
-- Room-backed canonical local data storage
-- JSON export/import backup with overwrite confirmation
-- Local Daily/Home generation and calendar-derived daily items
-- Template list and template edit screens
-- Settings screen
-
-Build:
-
-```sh
-cd clients/android
+make doctor
 make build
 ```
 
-Install on a connected device:
+Install the debug build on a connected Android device:
 
 ```sh
 make install
 ```
 
-More detail is in [clients/android/README.md](clients/android/README.md).
-
-### web-local
-
-Path:
-
-```text
-clients/web-local/
-```
-
-`web-local` is a no-build static browser client. It uses plain HTML, CSS, JavaScript, `fetch`, and `localStorage`; there is no npm, bundler, framework, or local backend shim.
-
-It includes:
-
-- Project, task, and subtask browsing
-- Project creation
-- Task and subtask creation
-- Bulk-create tasks and subtasks from pasted text
-- Task/subtask done/todo toggles
-- Daily, Home seasonal, and Leaving house checklist generation buttons
-- `localStorage` cache for recently fetched data
-- Read-only cached display when the server is unavailable
-
-Open directly:
-
-```text
-clients/web-local/index.html
-```
-
-Or serve locally:
+Run the unit tests:
 
 ```sh
-cd clients/web-local
-python3 -m http.server 5173
+./gradlew test
 ```
 
-Then open:
+Run `make help` to see the available Android build targets.
 
-```text
-http://localhost:5173
+## Website
+
+The public website lives in `app-website/`. It can be served by any static web server. For a local preview:
+
+```sh
+cd app-website
+python3 -m http.server 8000
 ```
-
-More detail is in [clients/web-local/README.md](clients/web-local/README.md).
-
-## Client Capability Notes
-
-Android is now fully device-local and does not synchronize with the retained server. `web-local` remains server-backed and can display cached reads when the server is unavailable.
