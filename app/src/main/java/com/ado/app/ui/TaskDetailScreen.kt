@@ -58,10 +58,11 @@ fun TaskDetailScreen(
     var subTaskMoveTasks by remember { mutableStateOf<List<Task>>(emptyList()) }
     var templates by remember { mutableStateOf<List<Template>>(emptyList()) }
     var showListTypeDialog by remember { mutableStateOf(false) }
-    var simpleView by remember { mutableStateOf(false) }
     var reorderMode by remember(taskId) { mutableStateOf(false) }
     var reorderSaving by remember(taskId) { mutableStateOf(false) }
     val rollUpCompleted by repository.rollUpCompletedFlow.collectAsState(initial = true)
+    val simpleViewFlow = remember(taskId) { repository.taskSubTasksSimpleViewFlow(taskId) }
+    val simpleView by simpleViewFlow.collectAsState(initial = false)
     val dataRevision by repository.dataRevisionFlow.collectAsState(initial = 0)
     var finishedExpanded by remember(taskId) { mutableStateOf(!rollUpCompleted) }
 
@@ -332,7 +333,9 @@ fun TaskDetailScreen(
             },
             BottomBarAction(
                 label = if (simpleView) "Full" else "Simple",
-                onClick = { simpleView = !simpleView },
+                onClick = {
+                    scope.launch { repository.setTaskSubTasksSimpleView(taskId, !simpleView) }
+                },
                 iconResource = R.drawable.ic_view_mode_24,
                 contentDescription = if (simpleView) "Switch to full view" else "Switch to simple view",
             ),

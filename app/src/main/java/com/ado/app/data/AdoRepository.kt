@@ -43,6 +43,7 @@ class AdoRepository(
     private val settingsStore: SettingsStore,
 ) {
     val rollUpCompletedFlow: Flow<Boolean> = settingsStore.rollUpCompletedFlow
+    val projectsSimpleViewFlow: Flow<Boolean> = settingsStore.projectsSimpleViewFlow
     private val dataRevision = MutableStateFlow(0)
     val dataRevisionFlow: Flow<Int> = dataRevision
 
@@ -50,6 +51,24 @@ class AdoRepository(
 
     suspend fun setRollUpCompleted(enabled: Boolean) {
         settingsStore.saveRollUpCompleted(enabled)
+    }
+
+    fun projectTasksSimpleViewFlow(projectId: String): Flow<Boolean> =
+        settingsStore.projectTasksSimpleViewFlow(projectId)
+
+    fun taskSubTasksSimpleViewFlow(taskId: String): Flow<Boolean> =
+        settingsStore.taskSubTasksSimpleViewFlow(taskId)
+
+    suspend fun setProjectsSimpleView(enabled: Boolean) {
+        settingsStore.saveProjectsSimpleView(enabled)
+    }
+
+    suspend fun setProjectTasksSimpleView(projectId: String, enabled: Boolean) {
+        settingsStore.saveProjectTasksSimpleView(projectId, enabled)
+    }
+
+    suspend fun setTaskSubTasksSimpleView(taskId: String, enabled: Boolean) {
+        settingsStore.saveTaskSubTasksSimpleView(taskId, enabled)
     }
 
     suspend fun initialize() {

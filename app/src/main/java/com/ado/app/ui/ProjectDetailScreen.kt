@@ -70,11 +70,12 @@ fun ProjectDetailScreen(
     var showPrintTaskSelection by remember { mutableStateOf(false) }
     var pendingDailyDate by remember { mutableStateOf<String?>(null) }
     var pendingCalendarDailyGeneration by remember { mutableStateOf<PendingDailyGeneration?>(null) }
-    var simpleView by remember { mutableStateOf(false) }
     var subTaskCounts by remember { mutableStateOf<Map<String, OpenDoneCounts>>(emptyMap()) }
     var reorderMode by remember(projectId) { mutableStateOf(false) }
     var reorderSaving by remember(projectId) { mutableStateOf(false) }
     val rollUpCompleted by repository.rollUpCompletedFlow.collectAsState(initial = true)
+    val simpleViewFlow = remember(projectId) { repository.projectTasksSimpleViewFlow(projectId) }
+    val simpleView by simpleViewFlow.collectAsState(initial = false)
     val dataRevision by repository.dataRevisionFlow.collectAsState(initial = 0)
     var finishedExpanded by remember(projectId) { mutableStateOf(!rollUpCompleted) }
 
@@ -400,7 +401,9 @@ fun ProjectDetailScreen(
             },
             BottomBarAction(
                 label = if (simpleView) "Full" else "Simple",
-                onClick = { simpleView = !simpleView },
+                onClick = {
+                    scope.launch { repository.setProjectTasksSimpleView(projectId, !simpleView) }
+                },
                 iconResource = R.drawable.ic_view_mode_24,
                 contentDescription = if (simpleView) "Switch to full view" else "Switch to simple view",
             ),

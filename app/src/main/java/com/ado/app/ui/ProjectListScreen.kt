@@ -30,7 +30,7 @@ fun ProjectListScreen(
     var showCreateDialog by remember { mutableStateOf(false) }
     var projectToEdit by remember { mutableStateOf<Project?>(null) }
     var projectToDelete by remember { mutableStateOf<Project?>(null) }
-    var simpleView by remember { mutableStateOf(false) }
+    val simpleView by repository.projectsSimpleViewFlow.collectAsState(initial = false)
     val dataRevision by repository.dataRevisionFlow.collectAsState(initial = 0)
 
     fun refresh() {
@@ -105,7 +105,7 @@ fun ProjectListScreen(
             ),
             BottomBarAction(
                 label = if (simpleView) "Full" else "Simple",
-                onClick = { simpleView = !simpleView },
+                onClick = { scope.launch { repository.setProjectsSimpleView(!simpleView) } },
                 iconResource = R.drawable.ic_view_mode_24,
                 contentDescription = if (simpleView) "Switch to full view" else "Switch to simple view",
             ),
