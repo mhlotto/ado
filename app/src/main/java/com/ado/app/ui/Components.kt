@@ -5,7 +5,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -57,8 +56,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
@@ -113,8 +110,6 @@ fun AdoScaffold(
     bottomActions: List<BottomBarAction> = emptyList(),
     content: @Composable (Modifier) -> Unit,
 ) {
-    val swipeBackThresholdPx = with(LocalDensity.current) { 96.dp.toPx() }
-
     Scaffold(
         topBar = {
             TopAppBar(
@@ -147,44 +142,8 @@ fun AdoScaffold(
             }
         },
     ) { padding ->
-        val contentModifier = Modifier
-            .padding(padding)
-            .then(
-                if (onBack != null) {
-                    Modifier.swipeLeftToBack(
-                        thresholdPx = swipeBackThresholdPx,
-                        onBack = onBack,
-                    )
-                } else {
-                    Modifier
-                },
-            )
-        content(contentModifier)
+        content(Modifier.padding(padding))
     }
-}
-
-private fun Modifier.swipeLeftToBack(
-    thresholdPx: Float,
-    onBack: () -> Unit,
-): Modifier = pointerInput(thresholdPx, onBack) {
-    var totalDragX = 0f
-    detectHorizontalDragGestures(
-        onDragStart = {
-            totalDragX = 0f
-        },
-        onDragCancel = {
-            totalDragX = 0f
-        },
-        onDragEnd = {
-            if (totalDragX <= -thresholdPx) {
-                onBack()
-            }
-            totalDragX = 0f
-        },
-        onHorizontalDrag = { _, dragAmount ->
-            totalDragX += dragAmount
-        },
-    )
 }
 
 @Composable
