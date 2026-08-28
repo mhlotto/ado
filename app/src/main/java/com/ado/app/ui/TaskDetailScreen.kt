@@ -50,7 +50,7 @@ fun TaskDetailScreen(
     var message by remember { mutableStateOf<String?>(null) }
     var showCreateSubTaskDialog by remember { mutableStateOf(false) }
     var showBulkSubTaskDialog by remember { mutableStateOf(false) }
-    var showTemplateSubTaskDialog by remember { mutableStateOf(false) }
+    var showTemplateSubTaskSheet by remember { mutableStateOf(false) }
     var showEditTaskDialog by remember { mutableStateOf(false) }
     var subTaskToEdit by remember { mutableStateOf<SubTask?>(null) }
     var subTaskToDelete by remember { mutableStateOf<SubTask?>(null) }
@@ -180,7 +180,7 @@ fun TaskDetailScreen(
         scope.launch {
             try {
                 templates = repository.getTemplates().data
-                showTemplateSubTaskDialog = true
+                showTemplateSubTaskSheet = true
             } catch (e: Exception) {
                 error = repository.friendlyError(e)
             }
@@ -265,7 +265,7 @@ fun TaskDetailScreen(
             try {
                 val result = repository.applyTemplateToTask(taskId, template.templateKey)
                 subtasks = repository.getSubTasks(taskId).data
-                showTemplateSubTaskDialog = false
+                showTemplateSubTaskSheet = false
                 message = if (result.added == 0) {
                     "No new subtasks to add from ${template.name}."
                 } else {
@@ -478,13 +478,12 @@ fun TaskDetailScreen(
         )
     }
 
-    if (showTemplateSubTaskDialog) {
-        QuickAddDialog(
-            title = "Template",
+    if (showTemplateSubTaskSheet) {
+        TemplatePickerBottomSheet(
             actions = templates.map { template ->
-                QuickAddAction(template.name) { applyTemplate(template) }
+                TemplatePickerAction(template.name) { applyTemplate(template) }
             },
-            onDismiss = { showTemplateSubTaskDialog = false },
+            onDismiss = { showTemplateSubTaskSheet = false },
         )
     }
 

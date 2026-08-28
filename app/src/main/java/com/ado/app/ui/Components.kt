@@ -34,6 +34,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.DropdownMenuItem
@@ -41,6 +42,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -1123,7 +1125,7 @@ fun MoveEntityFormDialog(
     )
 }
 
-data class QuickAddAction(val label: String, val onClick: () -> Unit)
+data class TemplatePickerAction(val label: String, val onClick: () -> Unit)
 
 @Composable
 fun BulkTextCreateDialog(
@@ -1169,34 +1171,49 @@ fun BulkTextCreateDialog(
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun QuickAddDialog(
-    title: String,
-    actions: List<QuickAddAction>,
+fun TemplatePickerBottomSheet(
+    actions: List<TemplatePickerAction>,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = {
-            Column(
-                modifier = Modifier
-                    .heightIn(max = 420.dp)
-                    .verticalScroll(rememberScrollState()),
-            ) {
-                actions.forEach { action ->
-                    DropdownMenuItem(
-                        text = { Text(action.label) },
-                        onClick = action.onClick,
-                    )
-                }
+        sheetState = sheetState,
+    ) {
+        Text(
+            text = "Choose template",
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+            style = MaterialTheme.typography.titleLarge,
+        )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 360.dp)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            actions.forEach { action ->
+                DropdownMenuItem(
+                    text = { Text(action.label) },
+                    onClick = {
+                        onDismiss()
+                        action.onClick()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
-        },
-        confirmButton = {},
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        },
-    )
+        }
+        TextButton(
+            onClick = onDismiss,
+            modifier = Modifier
+                .align(Alignment.End)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+        ) {
+            Text("Cancel")
+        }
+    }
 }
 
 @Composable

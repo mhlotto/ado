@@ -61,7 +61,7 @@ fun ProjectDetailScreen(
     var message by remember { mutableStateOf<String?>(null) }
     var showCreateTaskDialog by remember { mutableStateOf(false) }
     var showBulkTaskDialog by remember { mutableStateOf(false) }
-    var showTemplateTaskDialog by remember { mutableStateOf(false) }
+    var showTemplateTaskSheet by remember { mutableStateOf(false) }
     var taskToEdit by remember { mutableStateOf<Task?>(null) }
     var taskToDelete by remember { mutableStateOf<Task?>(null) }
     var taskMoveProjects by remember { mutableStateOf<List<Project>>(emptyList()) }
@@ -178,7 +178,7 @@ fun ProjectDetailScreen(
         scope.launch {
             try {
                 templates = repository.getTemplates().data
-                showTemplateTaskDialog = true
+                showTemplateTaskSheet = true
             } catch (e: Exception) {
                 error = repository.friendlyError(e)
             }
@@ -193,7 +193,7 @@ fun ProjectDetailScreen(
                 val created = repository.createTaskFromTemplate(projectId, template.templateKey)
                 tasks = repository.getTasks(projectId).data
                 refreshSubTaskCounts(tasks)
-                showTemplateTaskDialog = false
+                showTemplateTaskSheet = false
                 message = "Created ${created.name} from ${template.name}."
             } catch (e: Exception) {
                 error = repository.friendlyError(e)
@@ -551,25 +551,24 @@ fun ProjectDetailScreen(
         )
     }
 
-    if (showTemplateTaskDialog) {
-        QuickAddDialog(
-            title = "Template",
-            actions = projectQuickAddActions(
+    if (showTemplateTaskSheet) {
+        TemplatePickerBottomSheet(
+            actions = projectTemplatePickerActions(
                 project = project,
                 templates = templates,
                 onGenerateDaily = { date ->
-                    showTemplateTaskDialog = false
+                    showTemplateTaskSheet = false
                     pendingDailyDate = date
                 },
                 onGenerateSeasonal = { templateKey ->
-                    showTemplateTaskDialog = false
+                    showTemplateTaskSheet = false
                     generateSeasonal(templateKey)
                 },
                 onCreateFromTemplate = { template ->
                     createTaskFromTemplate(template)
                 },
             ),
-            onDismiss = { showTemplateTaskDialog = false },
+            onDismiss = { showTemplateTaskSheet = false },
         )
     }
 
@@ -724,29 +723,29 @@ private fun taskCreatedAt(task: Task): Instant =
         Instant.EPOCH
     }
 
-private fun projectQuickAddActions(
+private fun projectTemplatePickerActions(
     project: Project?,
     templates: List<Template>,
     onGenerateDaily: (String) -> Unit,
     onGenerateSeasonal: (String) -> Unit,
     onCreateFromTemplate: (Template) -> Unit,
-): List<QuickAddAction> {
+): List<TemplatePickerAction> {
     val generatedActions = when (project?.coreKey) {
         "daily" -> listOf(
-            QuickAddAction("Daily Today") { onGenerateDaily("today") },
-            QuickAddAction("Daily Tomorrow") { onGenerateDaily("tomorrow") },
+            TemplatePickerAction("Daily Today") { onGenerateDaily("today") },
+            TemplatePickerAction("Daily Tomorrow") { onGenerateDaily("tomorrow") },
         )
         "home" -> listOf(
-            QuickAddAction("Summer") { onGenerateSeasonal("summer_chores") },
-            QuickAddAction("Fall") { onGenerateSeasonal("fall_chores") },
-            QuickAddAction("Winter") { onGenerateSeasonal("winter_chores") },
-            QuickAddAction("Spring") { onGenerateSeasonal("spring_chores") },
-            QuickAddAction("Leaving house") { onGenerateSeasonal("leaving_house") },
+            TemplatePickerAction("Summer") { onGenerateSeasonal("summer_chores") },
+            TemplatePickerAction("Fall") { onGenerateSeasonal("fall_chores") },
+            TemplatePickerAction("Winter") { onGenerateSeasonal("winter_chores") },
+            TemplatePickerAction("Spring") { onGenerateSeasonal("spring_chores") },
+            TemplatePickerAction("Leaving house") { onGenerateSeasonal("leaving_house") },
         )
         else -> emptyList()
     }
     return generatedActions + templatesForProjectQuickAdd(project?.coreKey, templates).map { template ->
-        QuickAddAction("From template: ${template.name}") { onCreateFromTemplate(template) }
+        TemplatePickerAction("From template: ${template.name}") { onCreateFromTemplate(template) }
     }
 }
 
