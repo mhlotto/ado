@@ -1,6 +1,8 @@
 .cache/
 server/.cache/
 bin/
+.gradle/
+app/build/
 *.log
 clients/android/.gradle/
 clients/android/build/
