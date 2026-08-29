@@ -1095,6 +1095,18 @@ fun BulkTextCreateDialog(
     onSubmitBulk: (text: String) -> Unit,
 ) {
     var bulkText by remember(title) { mutableStateOf("") }
+    val bulkFocusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    var initialFocusRequested by rememberSaveable(title) { mutableStateOf(false) }
+
+    LaunchedEffect(initialFocusRequested) {
+        if (!initialFocusRequested) {
+            withFrameNanos { }
+            bulkFocusRequester.requestFocus()
+            keyboardController?.show()
+            initialFocusRequested = true
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1110,7 +1122,9 @@ fun BulkTextCreateDialog(
                 OutlinedTextField(
                     value = bulkText,
                     onValueChange = { bulkText = it },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(bulkFocusRequester),
                     label = { Text(bulkLabel) },
                     minLines = 8,
                 )
